@@ -10,6 +10,7 @@ import {
   Package,
   AlertTriangle,
   ArrowDownUp,
+  ArrowUpRight,
   Pencil,
   History,
   FileSpreadsheet,
@@ -21,6 +22,7 @@ import { friendlyError, supabase } from '@/lib/supabase';
 import { PART_CATEGORY_LABELS, PART_UNIT_SUGGESTIONS, STOCK_MOVEMENT_LABELS } from '@/lib/constants';
 import { cn, formatDate, formatNumber, slug } from '@/lib/utils';
 import type { Part, PartCategory, StockMovementType } from '@/types/db';
+import { QuickDispatchModal } from './QuickDispatchModal';
 import {
   downloadPartsTemplate,
   exportPartsToExcel,
@@ -46,6 +48,8 @@ export function InventoryPage() {
   const [editing, setEditing] = useState<Part | null>(null);
   const [movPart, setMovPart] = useState<Part | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [quickDispatchOpen, setQuickDispatchOpen] = useState(false);
+  const [quickDispatchPart, setQuickDispatchPart] = useState<Part | null>(null);
 
   const lowStockParts = useMemo(
     () => parts.filter((p) => p.active && Number(p.quantity) <= Number(p.min_stock)),
@@ -94,6 +98,19 @@ export function InventoryPage() {
                 onClick={() => exportPartsToExcel(filtered)}
               >
                 Exportar Excel
+              </Button>
+            )}
+            {(can('inventory', 'create') || can('inventory', 'edit')) && (
+              <Button
+                variant="secondary"
+                icon={<ArrowUpRight className="h-4 w-4 text-amber-600 dark:text-amber-400" />}
+                onClick={() => {
+                  setQuickDispatchPart(null);
+                  setQuickDispatchOpen(true);
+                }}
+                className="font-semibold text-slate-800 dark:text-slate-100"
+              >
+                Salida / Entrega de repuesto
               </Button>
             )}
             {can('inventory', 'create') && (
@@ -298,14 +315,27 @@ export function InventoryPage() {
                           <td className="text-right">
                             <div className="flex justify-end gap-1">
                               {(can('inventory', 'edit') || can('inventory', 'create')) && (
-                                <Button
-                                  size="sm"
-                                  variant="secondary"
-                                  title="Registrar ingreso, devolución o ajuste"
-                                  onClick={() => setMovPart(p)}
-                                >
-                                  <ArrowDownUp className="h-3.5 w-3.5" /> Stock
-                                </Button>
+                                <>
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    title="Registrar salida o entrega directa de este repuesto"
+                                    onClick={() => {
+                                      setQuickDispatchPart(p);
+                                      setQuickDispatchOpen(true);
+                                    }}
+                                  >
+                                    <ArrowUpRight className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" /> Salida
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    title="Registrar ingreso, devolución o ajuste de saldo"
+                                    onClick={() => setMovPart(p)}
+                                  >
+                                    <ArrowDownUp className="h-3.5 w-3.5" /> Stock
+                                  </Button>
+                                </>
                               )}
                               {can('inventory', 'edit') && (
                                 <Button
@@ -387,6 +417,14 @@ export function InventoryPage() {
 
       <PartFormModal open={formOpen} onClose={() => setFormOpen(false)} part={editing} />
       <StockMovementModal part={movPart} onClose={() => setMovPart(null)} />
+      <QuickDispatchModal
+        open={quickDispatchOpen}
+        onClose={() => {
+          setQuickDispatchOpen(false);
+          setQuickDispatchPart(null);
+        }}
+        initialPart={quickDispatchPart}
+      />
       <ImportPartsModal
         open={importOpen}
         onClose={() => setImportOpen(false)}
@@ -593,7 +631,7 @@ function PartFormModal({ open, onClose, part }: { open: boolean; onClose: () => 
 // -----------------------------------------------------------------------------
 function StockMovementModal({ part, onClose }: { part: Part | null; onClose: () => void }) {
   const move = useRecordStockMovement();
-  const [type, setType] = useState<'ingreso' | 'devolucion' | 'ajuste'>('ingreso');
+  const [type, setType] = useState<'ingreso' | 'egreso_or' | 'devolucion' | 'ajuste'>('ingreso');
   const [qty, setQty] = useState('');
   const [cost, setCost] = useState('');
   const [reason, setReason] = useState('');
@@ -652,12 +690,19 @@ function StockMovementModal({ part, onClose }: { part: Part | null; onClose: () 
           <Field label="Tipo de operación" required>
             <select className="input" value={type} onChange={(e) => setType(e.target.value as typeof type)}>
               <option value="ingreso">Ingreso por compra / recepción (+)</option>
+              <option value="egreso_or">Salida / Entrega de pañol (-)</option>
               <option value="devolucion">Devolución al pañol (+)</option>
               <option value="ajuste">Ajuste por recuento físico (= fija nuevo saldo)</option>
             </select>
           </Field>
           <Field
-            label={type === 'ajuste' ? `Nuevo stock físico real (${part.unit})` : `Cantidad que ingresa (${part.unit})`}
+            label={
+              type === 'ajuste'
+                ? `Nuevo stock físico real (${part.unit})`
+                : type === 'egreso_or'
+                  ? `Cantidad que sale / se entrega (${part.unit})`
+                  : `Cantidad que ingresa (${part.unit})`
+            }
             required
           >
             <input className="input" inputMode="decimal" autoFocus value={qty} onChange={(e) => setQty(e.target.value)} required />
@@ -667,8 +712,13 @@ function StockMovementModal({ part, onClose }: { part: Part | null; onClose: () 
               <input className="input" inputMode="decimal" value={cost} onChange={(e) => setCost(e.target.value)} />
             </Field>
           )}
-          <Field label="Motivo / remito / factura">
-            <input className="input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Ej.: Factura A 0001-00012345" />
+          <Field label={type === 'egreso_or' ? 'Entregado a / Chofer / Unidad / Motivo' : 'Motivo / remito / factura'}>
+            <input
+              className="input"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder={type === 'egreso_or' ? 'Ej.: Chofer Pérez · Ranger Int. 08 · Lámpara quemada' : 'Ej.: Factura A 0001-00012345'}
+            />
           </Field>
           <button type="submit" className="hidden" />
         </form>

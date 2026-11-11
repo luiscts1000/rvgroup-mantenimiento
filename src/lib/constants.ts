@@ -169,9 +169,9 @@ export const PART_UNIT_SUGGESTIONS = ['un.', 'litros', 'juego', 'par', 'kg', 'me
 
 export const STOCK_MOVEMENT_LABELS: Record<StockMovementType, string> = {
   ingreso: 'Ingreso de stock',
-  egreso_or: 'Consumo en OR',
+  egreso_or: 'Salida / Entrega de pañol',
   devolucion_or: 'Reintegro desde OR',
-  devolucion: 'Devolución',
+  devolucion: 'Devolución al pañol',
   ajuste: 'Ajuste de inventario',
 };
 
