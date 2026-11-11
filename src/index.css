@@ -1,0 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  button:not(:disabled) {
+    transition: transform 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease, color 0.18s ease;
+  }
+  button:not(:disabled):hover {
+    transform: translateY(-1.5px);
+  }
+  button:not(:disabled):active {
+    transform: translateY(0px) scale(0.985);
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900;
+  }
+  .input {
+    @apply block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder-slate-400
+      focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30
+      disabled:cursor-not-allowed disabled:bg-slate-100
+      dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:disabled:bg-slate-800;
+  }
+  .label {
+    @apply mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400;
+  }
+  .table-base {
+    @apply min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-800;
+  }
+  .table-base th {
+    @apply whitespace-nowrap bg-slate-50 px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800/60 dark:text-slate-400;
+  }
+  .table-base td {
+    @apply whitespace-nowrap px-3 py-2.5 text-slate-700 dark:text-slate-300;
+  }
+}
