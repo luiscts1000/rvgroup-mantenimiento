@@ -36,3 +36,27 @@ export function slug(value: unknown): string {
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '');
 }
+
+/**
+ * Retorna el Nombre y Apellido formal del usuario en lugar del correo crudo.
+ * Si no tiene nombre cargado, formatea el correo a nombre propio (ej: luis.rodriguez@... -> "Luis Rodriguez").
+ */
+export function getUserDisplayName(
+  profile?: { full_name?: string | null; email?: string | null } | null,
+  fallbackEmail?: string | null,
+): string {
+  if (profile?.full_name && profile.full_name.trim().length > 0) {
+    return profile.full_name.trim();
+  }
+  const email = profile?.email || fallbackEmail || '';
+  if (!email) return 'Usuario';
+
+  const userPart = email.split('@')[0];
+  if (!userPart) return 'Usuario';
+
+  return userPart
+    .split(/[._-]/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+}

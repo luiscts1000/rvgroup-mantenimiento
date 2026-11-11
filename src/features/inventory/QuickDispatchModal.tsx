@@ -1,7 +1,8 @@
 import { useState, useMemo, type FormEvent } from 'react';
 import { toast } from 'sonner';
-import { ArrowUpRight, Truck, User } from 'lucide-react';
+import { ArrowUpRight, Truck, User, PenTool, CheckCircle2, RotateCcw } from 'lucide-react';
 import { Button, Field, Modal } from '@/components/ui';
+import { SignaturePadModal } from '@/components/ui/SignaturePadModal';
 import { useVehicles } from '@/features/vehicles/api';
 import { useParts, useRecordStockMovement } from './api';
 import { formatPatente } from '@/lib/patente';
@@ -36,6 +37,8 @@ export function QuickDispatchModal({ open, onClose, initialPart }: QuickDispatch
   const [vehicleId, setVehicleId] = useState('');
   const [recipient, setRecipient] = useState('');
   const [reason, setReason] = useState('');
+  const [signatureData, setSignatureData] = useState<string | null>(null);
+  const [signatureModalOpen, setSignatureModalOpen] = useState(false);
 
   // Sincronizar parte inicial si se pasa por prop
   const currentPart = useMemo(() => {
@@ -88,6 +91,7 @@ export function QuickDispatchModal({ open, onClose, initialPart }: QuickDispatch
       recipient.trim() ? `Entregado a: ${recipient.trim()}` : null,
       `Unidad: ${vehicleText}`,
       reason.trim() ? `Motivo: ${reason.trim()}` : null,
+      signatureData ? '[Firma digital receptor: Registrada]' : null,
     ]
       .filter(Boolean)
       .join(' · ');
@@ -115,6 +119,7 @@ export function QuickDispatchModal({ open, onClose, initialPart }: QuickDispatch
     setVehicleId('');
     setRecipient('');
     setReason('');
+    setSignatureData(null);
     onClose();
   };
 
@@ -270,8 +275,71 @@ export function QuickDispatchModal({ open, onClose, initialPart }: QuickDispatch
           </div>
         </Field>
 
+        {/* Sección de Firma Digital de Conformidad (Chofer o Mecánico que retira) */}
+        <div className="rounded-xl border border-slate-200/80 bg-slate-50/70 p-3.5 dark:border-slate-800 dark:bg-slate-900/50">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+              Firma digital de conformidad (opcional)
+            </span>
+            {signatureData && (
+              <span className="inline-flex items-center gap-1 font-semibold text-emerald-600 dark:text-emerald-400 text-xs">
+                <CheckCircle2 className="h-3.5 w-3.5" /> Firmado
+              </span>
+            )}
+          </div>
+
+          {signatureData ? (
+            <div className="mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-950">
+              <div className="flex items-center gap-2">
+                <img
+                  src={signatureData}
+                  alt="Firma del receptor"
+                  className="h-10 w-28 object-contain"
+                />
+                <span className="text-xs text-slate-600 dark:text-slate-300">
+                  {recipient || 'Firma registrada'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSignatureModalOpen(true)}
+                className="flex items-center gap-1 text-xs text-brand-600 hover:text-brand-700 dark:text-brand-400"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                <span>Re-firmar</span>
+              </button>
+            </div>
+          ) : (
+            <div className="mt-2 flex items-center justify-between">
+              <p className="text-[11px] text-slate-500">
+                El chofer puede firmar con su dedo en la pantalla del celular.
+              </p>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                icon={<PenTool className="h-3.5 w-3.5" />}
+                onClick={() => setSignatureModalOpen(true)}
+                className="text-xs font-semibold"
+              >
+                Firmar en pantalla
+              </Button>
+            </div>
+          )}
+        </div>
+
         <button type="submit" className="hidden" />
       </form>
+
+      {/* Modal de Firma Digital en Pantalla */}
+      <SignaturePadModal
+        open={signatureModalOpen}
+        onClose={() => setSignatureModalOpen(false)}
+        onSave={(dataUrl) => setSignatureData(dataUrl)}
+        title="Firma de conformidad del chofer / receptor"
+        signerName={recipient || 'Chofer / Receptor'}
+        roleLabel="Retira"
+      />
     </Modal>
   );
 }

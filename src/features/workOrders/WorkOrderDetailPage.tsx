@@ -17,8 +17,10 @@ import {
   ClipboardCheck,
   Sparkles,
   Printer,
+  PenTool,
 } from 'lucide-react';
 import { Button, ConfirmDialog, EmptyState, Field, Spinner } from '@/components/ui';
+import { SignaturePadModal } from '@/components/ui/SignaturePadModal';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { useVehicle } from '@/features/vehicles/api';
 import { useParts } from '@/features/inventory/api';
@@ -45,6 +47,7 @@ import { WorkOrderFormModal } from './WorkOrderFormModal';
 import { WorkOrderStatusBadge } from './WorkOrdersPage';
 import {
   detectCompletionChecks,
+  extractMechanicSignature,
   generateWorkOrderPdf,
   splitWorkLines,
 } from './generateWorkOrderPdf';
@@ -99,6 +102,8 @@ export function WorkOrderDetailPage() {
   const [finishOption, setFinishOption] = useState<FinishCheckOption>('Reparado / Finalizado');
   const [obsInput, setObsInput] = useState('');
   const [draftItems, setDraftItems] = useState<ItemDraft[]>([]);
+  const [mechanicSignature, setMechanicSignature] = useState<string | null>(null);
+  const [sigModalOpen, setSigModalOpen] = useState(false);
 
   useEffect(() => {
     if (!wo) return;
@@ -128,7 +133,10 @@ export function WorkOrderDetailPage() {
     );
     setTotalHoursInput(wo.labor_hours != null ? String(wo.labor_hours) : '');
 
-    const cleanObs = (wo.observations ?? '')
+    const { cleanObs: obsWithoutSig, signatureDataUrl } = extractMechanicSignature(wo.observations);
+    setMechanicSignature(signatureDataUrl);
+
+    const cleanObs = obsWithoutSig
       .replace(
         /\[(reparado \/ finalizado|reparado provisoriamente|pendiente de repuesto|pendiente de reparación|requiere revisión posterior)\]\s*/gi,
         '',
@@ -233,7 +241,10 @@ export function WorkOrderDetailPage() {
         nextStatus = 'en_proceso';
       }
 
-      const taggedObs = `[${finishOption}]${obsInput.trim() ? ` ${obsInput.trim()}` : ''}`;
+      let taggedObs = `[${finishOption}]${obsInput.trim() ? ` ${obsInput.trim()}` : ''}`;
+      if (mechanicSignature) {
+        taggedObs += ` [FIRMA_MECANICO:${mechanicSignature}]`;
+      }
 
       await save.mutateAsync({
         id: wo.id,
@@ -315,7 +326,9 @@ export function WorkOrderDetailPage() {
   const otCode = `N° 00 00-${String(wo.order_number ?? 0).padStart(4, '0')}`;
   const sheetWorkRows = splitWorkLines(wo);
   const sheetChecks = detectCompletionChecks(wo);
-  const cleanSheetObs = (wo.observations ?? '')
+  const { cleanObs: sheetObsCleaned, signatureDataUrl: sheetMechanicSig } =
+    extractMechanicSignature(wo.observations);
+  const cleanSheetObs = sheetObsCleaned
     .replace(
       /\[(reparado \/ finalizado|reparado provisoriamente|pendiente de repuesto|pendiente de reparación|requiere revisión posterior)\]\s*/gi,
       '',
@@ -763,6 +776,58 @@ export function WorkOrderDetailPage() {
             </div>
           </div>
 
+          {/* Firma digital del mecánico */}
+          <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-800/40">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h4 className="flex items-center gap-2 text-sm font-bold text-slate-800 dark:text-slate-100">
+                  <PenTool className="h-4 w-4 text-brand-600" />
+                  Firma Digital del Mecánico / Responsable de Taller
+                </h4>
+                <p className="text-xs text-slate-500">
+                  Firme en la pantalla con el dedo o mouse para estampar la firma directamente en la OR oficial F02-PGV-02.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant={mechanicSignature ? 'secondary' : 'primary'}
+                size="sm"
+                icon={<PenTool className="h-3.5 w-3.5" />}
+                onClick={() => setSigModalOpen(true)}
+              >
+                {mechanicSignature ? 'Modificar firma en pantalla' : 'Firmar en pantalla'}
+              </Button>
+            </div>
+
+            {mechanicSignature ? (
+              <div className="mt-3 flex items-center gap-4">
+                <div className="rounded-xl border border-slate-300 bg-white p-2 shadow-sm dark:border-slate-700">
+                  <img
+                    src={mechanicSignature}
+                    alt="Firma del mecánico"
+                    className="h-14 w-auto max-w-[200px] object-contain"
+                  />
+                </div>
+                <div className="text-xs text-slate-600 dark:text-slate-300">
+                  <p className="font-semibold text-emerald-700 dark:text-emerald-400">
+                    ✔ Firma digital registrada y lista para estampar en el PDF
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setMechanicSignature(null)}
+                    className="mt-1 font-semibold text-red-600 hover:underline"
+                  >
+                    Borrar firma
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-2 text-xs italic text-slate-400">
+                (Opcional) Si no se firma ahora en pantalla, la OR puede cerrarse con la aclaración digital o firmarse físicamente en papel.
+              </p>
+            )}
+          </div>
+
           <div className="flex flex-wrap items-center justify-end gap-2.5 border-t border-slate-200 pt-4 dark:border-slate-800">
             <Button
               type="button"
@@ -1023,17 +1088,31 @@ export function WorkOrderDetailPage() {
               <div className="border-b border-slate-500 bg-slate-200 px-3 py-1.5 font-extrabold dark:bg-slate-800">
                 MECÁNICO / TALLER
               </div>
-              <div className="space-y-4 p-3">
+              <div className="space-y-3 p-3">
                 <p>
                   <b>Realizado por:</b>{' '}
                   {wo.mechanic_name || '.......................................................'}
                 </p>
-                <p>
-                  <b>Firma:</b>{' '}
-                  {wo.status === 'finalizada' || wo.status === 'cerrada'
-                    ? `${wo.mechanic_name || 'Completado desde Taller Móvil'} (Conformidad Digital)`
-                    : '.....................................................................'}
-                </p>
+                {(sheetMechanicSig || mechanicSignature) ? (
+                  <div>
+                    <b>Firma:</b>
+                    <div className="mt-1 inline-block rounded border border-slate-300 bg-white p-1">
+                      <img
+                        src={(sheetMechanicSig || mechanicSignature)!}
+                        alt="Firma del Mecánico"
+                        className="h-10 w-auto max-w-[160px] object-contain"
+                      />
+                    </div>
+                    <span className="block text-[10px] text-slate-500">Conformidad digital registrada</span>
+                  </div>
+                ) : (
+                  <p>
+                    <b>Firma:</b>{' '}
+                    {wo.status === 'finalizada' || wo.status === 'cerrada'
+                      ? `${wo.mechanic_name || 'Completado desde Taller Móvil'} (Conformidad Digital)`
+                      : '.....................................................................'}
+                  </p>
+                )}
               </div>
             </div>
             <div>
@@ -1212,6 +1291,18 @@ export function WorkOrderDetailPage() {
         message="¿Eliminar esta fotografía de la orden de reparación?"
         confirmLabel="Eliminar"
         danger
+      />
+
+      <SignaturePadModal
+        open={sigModalOpen}
+        onClose={() => setSigModalOpen(false)}
+        title="Firma del Mecánico — Registro F02-PGV-02"
+        roleLabel="Mecánico / Taller"
+        signerName={wo.mechanic_name || (profile?.role === 'mecanico' ? (profile.full_name || profile.email) : undefined)}
+        onSave={(dataUrl) => {
+          setMechanicSignature(dataUrl);
+          toast.success('Firma digital registrada. Se estampará en la Hoja de Trabajo y en el PDF.');
+        }}
       />
     </div>
   );

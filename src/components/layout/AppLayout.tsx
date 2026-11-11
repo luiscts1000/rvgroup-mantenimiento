@@ -13,14 +13,16 @@ import {
   ShieldCheck,
   Bell,
   Download,
+  Pencil,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { MODULES, ROLE_LABELS, CURRENT_STAGE, type ModuleDef } from '@/lib/constants';
-import { cn } from '@/lib/utils';
+import { cn, getUserDisplayName } from '@/lib/utils';
 import { Logo } from './Logo';
 import { ChangePasswordModal } from './ChangePasswordModal';
 import { AlertsCenterModal } from './AlertsCenterModal';
+import { EditProfileModal } from './EditProfileModal';
 import { useFleetStats } from '@/features/vehicles/api';
 
 interface BeforeInstallPromptEvent extends Event {
@@ -90,6 +92,8 @@ export function AppLayout() {
   const [isInstalled, setIsInstalled] = useState(false);
   const location = useLocation();
 
+  const [profileOpen, setProfileOpen] = useState(false);
+
   const { data: stats } = useFleetStats();
 
   const totalAlertsCount =
@@ -126,6 +130,7 @@ export function AppLayout() {
   };
 
   const isMechanicOnly = profile?.role === 'mecanico';
+  const userDisplayName = getUserDisplayName(profile);
 
   // El mecánico solo ve su apartado de Hojas de Trabajo (Órdenes de Reparación)
   const visible = isMechanicOnly
@@ -137,14 +142,33 @@ export function AppLayout() {
   const userBlock = (
     <div className="border-t border-white/10 bg-black/15 p-3.5">
       <div className={cn('flex items-center gap-3', collapsed && 'justify-center')}>
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-rvgreen-500 to-brand-600 text-sm font-extrabold text-white shadow-md ring-2 ring-white/20">
-          {(profile?.full_name || profile?.email || '?').charAt(0).toUpperCase()}
-        </div>
+        <button
+          type="button"
+          onClick={() => setProfileOpen(true)}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-rvgreen-500 to-brand-600 text-sm font-extrabold text-white shadow-md ring-2 ring-white/20 transition hover:scale-105"
+          title="Editar mi nombre y datos de perfil"
+        >
+          {(userDisplayName || '?').charAt(0).toUpperCase()}
+        </button>
         {!collapsed && (
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold text-white">
-              {profile?.full_name || profile?.email}
-            </p>
+            <div className="flex items-center justify-between">
+              <p
+                onClick={() => setProfileOpen(true)}
+                className="cursor-pointer truncate text-sm font-semibold text-white transition hover:text-rvgreen-300"
+                title="Haga clic para editar su nombre y datos"
+              >
+                {userDisplayName}
+              </p>
+              <button
+                type="button"
+                onClick={() => setProfileOpen(true)}
+                className="rounded p-1 text-white/50 hover:bg-white/10 hover:text-white"
+                title="Editar mi nombre"
+              >
+                <Pencil className="h-3 w-3" />
+              </button>
+            </div>
             <p className="inline-flex items-center gap-1.5 text-xs font-medium text-rvgreen-300">
               <span className="h-1.5 w-1.5 rounded-full bg-rvgreen-400" />
               {profile ? ROLE_LABELS[profile.role] : ''}
@@ -293,6 +317,21 @@ export function AppLayout() {
             </button>
           )}
 
+          {/* Chip de Usuario con Nombre y Apellido */}
+          <button
+            type="button"
+            onClick={() => setProfileOpen(true)}
+            className="flex items-center gap-2 rounded-xl border border-slate-200/80 bg-slate-50/80 px-2.5 py-1 text-xs transition hover:border-brand-300 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-800/60 dark:hover:bg-slate-800"
+            title="Editar mi nombre y datos de perfil"
+          >
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-brand-700 text-[11px] font-bold text-white dark:bg-brand-600">
+              {(userDisplayName || '?').charAt(0).toUpperCase()}
+            </span>
+            <span className="max-w-[130px] truncate font-semibold text-slate-800 dark:text-slate-200 sm:max-w-[180px]">
+              {userDisplayName}
+            </span>
+          </button>
+
           <button
             onClick={toggle}
             className="rounded-xl p-2 text-slate-600 transition hover:-translate-y-0.5 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
@@ -355,6 +394,7 @@ export function AppLayout() {
 
       <ChangePasswordModal open={pwdOpen} onClose={() => setPwdOpen(false)} />
       <AlertsCenterModal open={alertsOpen} onClose={() => setAlertsOpen(false)} />
+      <EditProfileModal open={profileOpen} onClose={() => setProfileOpen(false)} />
     </div>
   );
 }

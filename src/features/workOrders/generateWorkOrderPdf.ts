@@ -130,6 +130,17 @@ export function detectCompletionChecks(wo: WorkOrder) {
   };
 }
 
+export function extractMechanicSignature(observations: string | null | undefined): {
+  cleanObs: string;
+  signatureDataUrl: string | null;
+} {
+  if (!observations) return { cleanObs: '', signatureDataUrl: null };
+  const match = observations.match(/\[FIRMA_MECANICO:(data:image\/[^;]+;base64,[^\]]+)\]/);
+  const signatureDataUrl = match ? match[1] : null;
+  const cleanObs = observations.replace(/\[FIRMA_MECANICO:[^\]]+\]/g, '').trim();
+  return { cleanObs, signatureDataUrl };
+}
+
 function buildDefinition(
   wo: WorkOrder,
   vehicle: Vehicle | null | undefined,
@@ -210,7 +221,9 @@ function buildDefinition(
   }
 
   const completion = detectCompletionChecks(wo);
-  const cleanObs = (wo.observations ?? '')
+  const { cleanObs: obsWithoutSig, signatureDataUrl: mechanicSignature } =
+    extractMechanicSignature(wo.observations);
+  const cleanObs = obsWithoutSig
     .replace(
       /\[(reparado \/ finalizado|reparado provisoriamente|pendiente de repuesto|pendiente de reparación|requiere revisión posterior)\]\s*/gi,
       '',
@@ -629,30 +642,56 @@ function buildDefinition(
             ],
             [
               {
-                stack: [
-                  {
-                    text: [
-                      { text: 'Realizado por: ', bold: true },
+                stack: mechanicSignature
+                  ? [
                       {
-                        text:
-                          wo.mechanic_name ||
-                          '.......................................................',
+                        text: [
+                          { text: 'Realizado por: ', bold: true },
+                          {
+                            text:
+                              wo.mechanic_name ||
+                              'Mecánico / Personal de Taller',
+                          },
+                        ],
+                        margin: [0, 1, 0, 2],
+                      },
+                      {
+                        image: mechanicSignature,
+                        fit: [120, 26],
+                        alignment: 'center',
+                        margin: [0, 1, 0, 1],
+                      },
+                      {
+                        text: 'Firma Digital Mecánico',
+                        fontSize: 6,
+                        alignment: 'center',
+                        color: '#64748b',
+                      },
+                    ]
+                  : [
+                      {
+                        text: [
+                          { text: 'Realizado por: ', bold: true },
+                          {
+                            text:
+                              wo.mechanic_name ||
+                              '.......................................................',
+                          },
+                        ],
+                        margin: [0, 2, 0, 8],
+                      },
+                      {
+                        text: [
+                          { text: 'Firma: ', bold: true },
+                          {
+                            text:
+                              wo.status === 'finalizada' || wo.status === 'cerrada'
+                                ? `${wo.mechanic_name || 'Completado en Taller Móvil'} (Digital)`
+                                : '.....................................................................',
+                          },
+                        ],
                       },
                     ],
-                    margin: [0, 2, 0, 8],
-                  },
-                  {
-                    text: [
-                      { text: 'Firma: ', bold: true },
-                      {
-                        text:
-                          wo.status === 'finalizada' || wo.status === 'cerrada'
-                            ? `${wo.mechanic_name || 'Completado en Taller Móvil'} (Digital)`
-                            : '.....................................................................',
-                      },
-                    ],
-                  },
-                ],
                 margin: [4, 2.5, 4, 3],
               },
               {
