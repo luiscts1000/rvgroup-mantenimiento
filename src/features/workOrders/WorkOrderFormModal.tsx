@@ -6,6 +6,7 @@ import { useAuth } from '@/features/auth/AuthProvider';
 import { useVehicles } from '@/features/vehicles/api';
 import { useParts } from '@/features/inventory/api';
 import { useServiceTypes } from '@/features/services/ServicesPage';
+import { useLaborRates, useLaborSettings } from '@/features/services/laborRatesApi';
 import { friendlyError, supabase } from '@/lib/supabase';
 import { formatOrderNumber, MAINTENANCE_TYPE_LABELS, WO_STATUS_LABELS } from '@/lib/constants';
 import { formatPatente, normalizePatente } from '@/lib/patente';
@@ -62,6 +63,10 @@ export function WorkOrderFormModal({
     () => vehicles.find((v) => v.id === vehicleId) ?? null,
     [vehicles, vehicleId],
   );
+
+  const { data: laborRates = [] } = useLaborRates();
+  const { data: laborSettings } = useLaborSettings();
+  const hourlyRate = laborSettings?.hourly_rate ?? 28000;
 
   // Cuando el usuario tipea una patente exacta, selecciona automáticamente la unidad
   const onPatenteInput = (raw: string) => {
@@ -674,15 +679,83 @@ export function WorkOrderFormModal({
                 placeholder="Refrigerante, líquido de frenos, urea…"
               />
             </Field>
-            <Field label="Detalle de mano de obra">
-              <input className="input" value={laborDetail} onChange={(e) => setLaborDetail(e.target.value)} placeholder="Propia / tercerizada" />
-            </Field>
-            <Field label="Horas de mano de obra">
-              <input className="input" inputMode="decimal" value={laborHours} onChange={(e) => setLaborHours(e.target.value)} />
-            </Field>
-            <Field label="Costo de mano de obra ($)">
-              <input className="input" inputMode="decimal" value={laborCost} onChange={(e) => setLaborCost(e.target.value)} />
-            </Field>
+            <div className="sm:col-span-3 rounded-xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-800/40">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                  Tarifario de Mano de Obra (Tarifa Base: $ {formatNumber(hourlyRate)} / hora)
+                </span>
+                <select
+                  className="input max-w-xs text-xs"
+                  defaultValue=""
+                  onChange={(e) => {
+                    const selected = laborRates.find((r) => r.id === e.target.value);
+                    if (selected) {
+                      setLaborHours(String(selected.estimated_hours));
+                      setLaborCost(String(selected.price));
+                      if (!laborDetail.trim()) {
+                        setLaborDetail(selected.name);
+                      }
+                      toast.success(`Mano de obra aplicada: ${selected.name} ($ ${formatNumber(selected.price)})`);
+                    }
+                  }}
+                >
+                  <option value="">— Cotizar según trabajo tarifado —</option>
+                  {laborRates.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      [{r.category}] {r.name} — $ {formatNumber(r.price)} ({r.estimated_hours} Hs)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <Field label="Detalle de mano de obra">
+                  <input
+                    className="input"
+                    value={laborDetail}
+                    onChange={(e) => setLaborDetail(e.target.value)}
+                    placeholder="Propia / taller / tarea…"
+                  />
+                </Field>
+                <Field label="Horas de mano de obra">
+                  <input
+                    className="input font-semibold"
+                    inputMode="decimal"
+                    placeholder="Ej.: 2.5"
+                    value={laborHours}
+                    onChange={(e) => setLaborHours(e.target.value)}
+                  />
+                </Field>
+                <Field label="Costo de mano de obra ($)">
+                  <div>
+                    <input
+                      className="input font-mono font-bold"
+                      inputMode="decimal"
+                      placeholder="Ej.: 70000"
+                      value={laborCost}
+                      onChange={(e) => setLaborCost(e.target.value)}
+                    />
+                    {laborHours && parseFloat(laborHours) > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const hs = parseFloat(laborHours.replace(',', '.'));
+                          if (Number.isFinite(hs) && hs > 0) {
+                            setLaborCost(String(Math.round(hs * hourlyRate)));
+                            toast.success(
+                              `Costo calculado: ${hs} Hs × $ ${formatNumber(hourlyRate)} = $ ${formatNumber(Math.round(hs * hourlyRate))}`,
+                            );
+                          }
+                        }}
+                        className="mt-1 block text-[11px] font-bold text-brand-700 hover:underline dark:text-brand-400"
+                      >
+                        ⚡ Calcular con valor hora ($ {formatNumber(hourlyRate)}): $ {formatNumber(Math.round(parseFloat(laborHours || '0') * hourlyRate))}
+                      </button>
+                    )}
+                  </div>
+                </Field>
+              </div>
+            </div>
             <Field label="Observaciones" className="sm:col-span-3">
               <textarea className="input min-h-[65px]" value={observations} onChange={(e) => setObservations(e.target.value)} />
             </Field>

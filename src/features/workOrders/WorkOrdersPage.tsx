@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Plus,
   Download,
@@ -23,6 +23,7 @@ import {
   ArrowUpNarrowWide,
   FileDown,
   ClipboardCheck,
+  DollarSign,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge, Button, EmptyState, PageHeader, Spinner, StatCard } from '@/components/ui';
@@ -433,6 +434,13 @@ export function WorkOrdersPage() {
               >
                 {mechanicFilter === profile.id ? 'Viendo mis asignadas' : 'Ver todas las del taller'}
               </Button>
+            )}
+            {!isMechanicOnly && (
+              <Link to="/servicios?tab=mano-de-obra">
+                <Button variant="secondary" icon={<DollarSign className="h-4 w-4" />}>
+                  Tarifario M.O.
+                </Button>
+              </Link>
             )}
             {!isMechanicOnly && can('work_orders', 'export') && (
               <Button

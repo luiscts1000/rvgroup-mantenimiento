@@ -1,7 +1,8 @@
 import { useMemo, useState, type FormEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, ListChecks, FolderTree, Truck, Info } from 'lucide-react';
+import { Plus, Pencil, Trash2, ListChecks, FolderTree, Truck, Info, DollarSign } from 'lucide-react';
 import { Badge, Button, ConfirmDialog, EmptyState, Field, Modal, PageHeader, Spinner } from '@/components/ui';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { useCategories, useVehicles } from '@/features/vehicles/api';
@@ -11,6 +12,7 @@ import { FILTER_ROLE_SUGGESTIONS, MAINTENANCE_TYPE_LABELS } from '@/lib/constant
 import { formatPatente } from '@/lib/patente';
 import { cn } from '@/lib/utils';
 import type { MaintenanceType, ServiceTemplate, ServiceType } from '@/types/db';
+import { LaborRatesTab } from './LaborRatesTab';
 
 export function useServiceTypes() {
   return useQuery({
@@ -42,11 +44,17 @@ export function useServiceTemplates() {
 export function ServicesPage() {
   const { can } = useAuth();
   const qc = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { data: serviceTypes = [], isLoading: stLoading } = useServiceTypes();
   const { data: templates = [], isLoading: tplLoading } = useServiceTemplates();
   const { data: categories = [] } = useCategories();
 
-  const [scopeTab, setScopeTab] = useState<'categoria' | 'patente' | 'tipos'>('categoria');
+  const requestedTab = searchParams.get('tab');
+  const [scopeTab, setScopeTab] = useState<'mano_de_obra' | 'categoria' | 'patente' | 'tipos'>(
+    requestedTab === 'categoria' || requestedTab === 'patente' || requestedTab === 'tipos'
+      ? requestedTab
+      : 'mano_de_obra',
+  );
   const [filterCat, setFilterCat] = useState('');
   const [filterService, setFilterService] = useState('');
   const [editingTpl, setEditingTpl] = useState<ServiceTemplate | 'new-cat' | 'new-veh' | null>(null);
@@ -86,10 +94,18 @@ export function ServicesPage() {
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Servicios predefinidos y configuración de repuestos"
-        subtitle="Configuración de filtros, lubricantes y repuestos por modelo/categoría y por patente individual"
+        title={
+          scopeTab === 'mano_de_obra'
+            ? 'Tarifario y Precios de Mano de Obra'
+            : 'Servicios predefinidos y configuración de repuestos'
+        }
+        subtitle={
+          scopeTab === 'mano_de_obra'
+            ? 'Precios actualizables de mano de obra por tarea y valor hora del taller mecánico RV Group'
+            : 'Configuración de filtros, lubricantes y repuestos por modelo/categoría y por patente individual'
+        }
         actions={
-          canEdit && (
+          canEdit && scopeTab !== 'mano_de_obra' ? (
             <>
               <Button variant="secondary" icon={<Plus className="h-4 w-4" />} onClick={() => setNewServiceOpen(true)}>
                 Nuevo tipo de servicio
@@ -101,50 +117,63 @@ export function ServicesPage() {
                 {scopeTab === 'patente' ? 'Configurar para una patente' : 'Configurar para un modelo'}
               </Button>
             </>
-          )
+          ) : undefined
         }
       />
-
-      <div className="flex items-start gap-2.5 rounded-xl border border-brand-200 bg-brand-50/70 p-3.5 text-xs text-brand-900 dark:border-brand-900/50 dark:bg-brand-950/30 dark:text-brand-200">
-        <Info className="mt-0.5 h-4 w-4 shrink-0" />
-        <div>
-          <b>Cómo funciona al abrir una Orden de Reparación:</b> cuando seleccione una patente y un servicio (por ejemplo,{' '}
-          <i>Servicio básico</i> en una <i>Ford Ranger 2.2</i> o en una <i>Sprinter 516</i>), el sistema buscará primero si esa{' '}
-          <b>patente individual</b> tiene una configuración propia; si no, aplicará automáticamente la configuración de su{' '}
-          <b>modelo/categoría</b> proponiendo filtros, códigos, cantidades y litros de aceite.
-        </div>
-      </div>
 
       {/* Pestañas */}
       <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2 dark:border-slate-800">
         <button
-          onClick={() => setScopeTab('categoria')}
+          onClick={() => {
+            setScopeTab('mano_de_obra');
+            setSearchParams({ tab: 'mano-de-obra' });
+          }}
           className={cn(
-            'inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium',
+            'inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-bold transition-all',
+            scopeTab === 'mano_de_obra'
+              ? 'bg-brand-600 text-white shadow-sm'
+              : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800',
+          )}
+        >
+          <DollarSign className="h-4 w-4" /> Tarifario de Mano de Obra ($)
+        </button>
+        <button
+          onClick={() => {
+            setScopeTab('categoria');
+            setSearchParams({ tab: 'categoria' });
+          }}
+          className={cn(
+            'inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-bold transition-all',
             scopeTab === 'categoria'
-              ? 'bg-brand-700 text-white'
+              ? 'bg-brand-600 text-white shadow-sm'
               : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800',
           )}
         >
           <FolderTree className="h-4 w-4" /> Por modelo / categoría ({templates.filter((t) => t.category_id).length})
         </button>
         <button
-          onClick={() => setScopeTab('patente')}
+          onClick={() => {
+            setScopeTab('patente');
+            setSearchParams({ tab: 'patente' });
+          }}
           className={cn(
-            'inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium',
+            'inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-bold transition-all',
             scopeTab === 'patente'
-              ? 'bg-brand-700 text-white'
+              ? 'bg-brand-600 text-white shadow-sm'
               : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800',
           )}
         >
           <Truck className="h-4 w-4" /> Por patente individual ({templates.filter((t) => t.vehicle_id).length})
         </button>
         <button
-          onClick={() => setScopeTab('tipos')}
+          onClick={() => {
+            setScopeTab('tipos');
+            setSearchParams({ tab: 'tipos' });
+          }}
           className={cn(
-            'inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium',
+            'inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-bold transition-all',
             scopeTab === 'tipos'
-              ? 'bg-brand-700 text-white'
+              ? 'bg-brand-600 text-white shadow-sm'
               : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800',
           )}
         >
@@ -152,7 +181,23 @@ export function ServicesPage() {
         </button>
       </div>
 
-      {scopeTab !== 'tipos' && (
+      {/* 1. Vista de Tarifario de Mano de Obra */}
+      {scopeTab === 'mano_de_obra' && <LaborRatesTab />}
+
+      {/* Aviso explicativo para las configuraciones de repuestos */}
+      {scopeTab !== 'mano_de_obra' && (
+        <div className="flex items-start gap-2.5 rounded-xl border border-brand-200 bg-brand-50/70 p-3.5 text-xs text-brand-900 dark:border-brand-900/50 dark:bg-brand-950/30 dark:text-brand-200">
+          <Info className="mt-0.5 h-4 w-4 shrink-0" />
+          <div>
+            <b>Cómo funciona al abrir una Orden de Reparación:</b> cuando seleccione una patente y un servicio (por ejemplo,{' '}
+            <i>Servicio básico</i> en una <i>Ford Ranger 2.2</i> o en una <i>Sprinter 516</i>), el sistema buscará primero si esa{' '}
+            <b>patente individual</b> tiene una configuración propia; si no, aplicará automáticamente la configuración de su{' '}
+            <b>modelo/categoría</b> proponiendo filtros, códigos, cantidades y litros de aceite.
+          </div>
+        </div>
+      )}
+
+      {scopeTab !== 'tipos' && scopeTab !== 'mano_de_obra' && (
         <div className="card grid grid-cols-1 gap-3 p-3 sm:grid-cols-2">
           {scopeTab === 'categoria' && (
             <select className="input" value={filterCat} onChange={(e) => setFilterCat(e.target.value)}>

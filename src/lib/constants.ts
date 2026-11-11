@@ -6,11 +6,11 @@ import {
   ClipboardList,
   CalendarClock,
   ShieldCheck,
-  ListChecks,
   History,
   BarChart3,
   Users,
   Settings,
+  DollarSign,
   type LucideIcon,
 } from 'lucide-react';
 import type {
@@ -47,7 +47,7 @@ export const MODULES: ModuleDef[] = [
   { key: 'pending', label: 'Pendientes generales', short: 'Pendientes', path: '/pendientes', icon: ClipboardList, stage: 4 },
   { key: 'appointments', label: 'Turnos y proveedores', short: 'Turnos', path: '/turnos', icon: CalendarClock, stage: 4 },
   { key: 'preventive', label: 'Mantenimiento preventivo y RTO', short: 'Preventivo', path: '/preventivo', icon: ShieldCheck, stage: 5 },
-  { key: 'services', label: 'Servicios predefinidos', short: 'Servicios', path: '/servicios', icon: ListChecks, stage: 3 },
+  { key: 'services', label: 'Tarifario M.O. y servicios', short: 'Tarifas M.O.', path: '/servicios', icon: DollarSign, stage: 3 },
   { key: 'history', label: 'Historial de mantenimiento', short: 'Historial', path: '/historial', icon: History, stage: 6 },
   { key: 'reports', label: 'Estadísticas y reportes', short: 'Reportes', path: '/reportes', icon: BarChart3, stage: 6 },
   { key: 'users', label: 'Usuarios y permisos', short: 'Usuarios', path: '/usuarios', icon: Users, stage: 1 },
