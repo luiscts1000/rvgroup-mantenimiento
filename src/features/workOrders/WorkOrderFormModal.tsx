@@ -517,7 +517,7 @@ export function WorkOrderFormModal({
                   onClick={() => {
                     setMaintenanceType(preset.type);
                     setRequestedWork((prev) =>
-                      prev.trim() ? `${prev.trim()} · ${preset.text}` : preset.text,
+                      prev.trim() ? `${prev.trim()}\n${preset.text}` : preset.text,
                     );
                   }}
                   className="rounded-lg border border-brand-200 bg-brand-50/70 px-2.5 py-1 text-xs font-semibold text-brand-700 transition-all duration-200 hover:-translate-y-0.5 hover:bg-brand-600 hover:text-white dark:border-brand-800 dark:bg-brand-950/40 dark:text-brand-300"

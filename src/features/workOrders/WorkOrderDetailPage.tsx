@@ -122,12 +122,17 @@ export function WorkOrderDetailPage() {
       vehicle?.next_service_km != null ? String(vehicle.next_service_km) : '',
     );
 
-    const parsedLines = splitWorkLines(wo).filter((r) => r.text.trim() !== '');
+    const parsedLines = splitWorkLines(wo)
+      .filter((r) => r.text.trim() !== '')
+      .map((r) => ({
+        text: r.text,
+        hours: r.hours.replace(/\s*hs?$/i, '').trim(),
+      }));
     setWorkLines(
       parsedLines.length > 0
         ? parsedLines
         : [
-            { text: wo.requested_work || '', hours: '' },
+            { text: '', hours: '' },
             { text: '', hours: '' },
           ],
     );

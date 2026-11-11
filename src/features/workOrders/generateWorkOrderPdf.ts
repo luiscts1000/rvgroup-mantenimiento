@@ -61,45 +61,91 @@ function sectionBar(title: string): Content {
   };
 }
 
-export function splitWorkLines(wo: WorkOrder): { text: string; hours: string }[] {
-  const rawLines: string[] = [];
-  if (wo.work_performed) {
-    for (const line of wo.work_performed.split(/\r?\n/)) {
-      const clean = line.replace(/^\s*\d+[\.\)\-]\s*/, '').trim();
-      if (clean) rawLines.push(clean);
+export function parseWorkTasks(text: string | null | undefined): string[] {
+  if (!text || !text.trim()) return [];
+  const tasks: string[] = [];
+  const lines = text.split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    // Si la línea contiene tareas unidas con ' · '
+    if (trimmed.includes(' · ')) {
+      const parts = trimmed.split(/\s*·\s*/);
+      for (const p of parts) {
+        const clean = p.replace(/^\s*\d+[\.\)\-]\s*/, '').trim();
+        if (clean) tasks.push(clean);
+      }
+    } else {
+      const clean = trimmed.replace(/^\s*\d+[\.\)\-]\s*/, '').trim();
+      if (clean) tasks.push(clean);
     }
   }
-  if (wo.diagnosis && !rawLines.includes(wo.diagnosis.trim())) {
-    rawLines.push(`Diagnóstico: ${wo.diagnosis.trim()}`);
-  }
-  if (wo.oil_type) {
-    rawLines.push(
-      `Aceite / Lubricante: ${wo.oil_type}${wo.oil_liters != null ? ` (${wo.oil_liters} L)` : ''}${
-        wo.other_fluids ? ` · Otros fluidos: ${wo.other_fluids}` : ''
-      }`,
-    );
-  } else if (wo.other_fluids) {
-    rawLines.push(`Fluidos: ${wo.other_fluids}`);
-  }
-  if (wo.labor_detail && !rawLines.includes(wo.labor_detail.trim())) {
-    rawLines.push(wo.labor_detail.trim());
-  }
+  return tasks;
+}
 
-  // 5 filas ajustadas para garantizar una sola hoja exacta
-  const rows: { text: string; hours: string }[] = [];
-  for (let i = 0; i < 5; i++) {
-    const line = rawLines[i] ?? '';
-    let text = line;
+export function splitWorkLines(wo: WorkOrder): { text: string; hours: string }[] {
+  const rawTasks: { text: string; hours: string }[] = [];
+
+  // 1. Tareas de trabajo realizado (o trabajo solicitado si aún no se guardó el realizado)
+  const sourceText =
+    wo.work_performed && wo.work_performed.trim()
+      ? wo.work_performed
+      : wo.requested_work || '';
+
+  const parsed = parseWorkTasks(sourceText);
+  for (const item of parsed) {
+    let text = item;
     let hours = '';
-    const m = line.match(/^(.*?)\s*[\[\(](\d+(?:[.,]\d+)?)\s*h(?:s|oras)?[\]\)]\s*$/i);
+    const m = item.match(/^(.*?)\s*[\[\(](\d+(?:[.,]\d+)?)\s*h(?:s|oras)?[\]\)]\s*$/i);
     if (m) {
       text = m[1].trim();
       hours = `${m[2]} Hs`;
-    } else if (i === 0 && wo.labor_hours != null && rawLines.length <= 1) {
-      hours = `${wo.labor_hours} Hs`;
     }
-    rows.push({ text, hours });
+    rawTasks.push({ text, hours });
   }
+
+  // 2. Si hay diagnóstico técnico relevante
+  if (
+    wo.diagnosis &&
+    !rawTasks.some((t) => t.text.toLowerCase().includes(wo.diagnosis!.trim().toLowerCase()))
+  ) {
+    rawTasks.push({ text: `Diagnóstico: ${wo.diagnosis.trim()}`, hours: '' });
+  }
+
+  // 3. Fluidos y lubricantes
+  if (wo.oil_type) {
+    const oilStr = `Aceite / Lubricante: ${wo.oil_type}${
+      wo.oil_liters != null ? ` (${wo.oil_liters} L)` : ''
+    }${wo.other_fluids ? ` · Otros fluidos: ${wo.other_fluids}` : ''}`;
+    if (!rawTasks.some((t) => t.text.toLowerCase().includes(wo.oil_type!.toLowerCase()))) {
+      rawTasks.push({ text: oilStr, hours: '' });
+    }
+  } else if (
+    wo.other_fluids &&
+    !rawTasks.some((t) => t.text.toLowerCase().includes(wo.other_fluids!.toLowerCase()))
+  ) {
+    rawTasks.push({ text: `Fluidos: ${wo.other_fluids}`, hours: '' });
+  }
+
+  if (
+    wo.labor_detail &&
+    !rawTasks.some((t) => t.text.toLowerCase().includes(wo.labor_detail!.trim().toLowerCase()))
+  ) {
+    rawTasks.push({ text: wo.labor_detail.trim(), hours: '' });
+  }
+
+  // Si solo hay 1 tarea y no tiene horas pero hay wo.labor_hours cargado en la OT
+  if (rawTasks.length === 1 && !rawTasks[0].hours && wo.labor_hours != null) {
+    rawTasks[0].hours = `${wo.labor_hours} Hs`;
+  }
+
+  // Garantizar mínimo 5 filas para mantener la plantilla del formulario F02-PGV-02
+  const totalRows = Math.max(5, rawTasks.length);
+  const rows: { text: string; hours: string }[] = [];
+  for (let i = 0; i < totalRows; i++) {
+    rows.push(rawTasks[i] ?? { text: '', hours: '' });
+  }
+
   return rows;
 }
 
@@ -500,13 +546,13 @@ function buildDefinition(
                   { text: row.text || ' ' },
                 ],
                 fontSize: 7.5,
-                margin: [4, 2, 4, 2] as [number, number, number, number],
+                margin: [4, 1.6, 4, 1.6] as [number, number, number, number],
               },
               {
                 text: row.hours || ' ',
                 alignment: 'center' as const,
                 fontSize: 7.5,
-                margin: [2, 2, 2, 2] as [number, number, number, number],
+                margin: [2, 1.6, 2, 1.6] as [number, number, number, number],
               },
             ]),
             [
