@@ -15,6 +15,7 @@ import {
   BarChart3,
   History,
   Clock,
+  RotateCcw,
 } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Button, EmptyState, PageHeader, Spinner, StatCard } from '@/components/ui';
@@ -25,6 +26,7 @@ import { useFleetStats, useVehicles } from '@/features/vehicles/api';
 import { DemoBadge, StatusBadge } from '@/features/vehicles/VehiclesPage';
 import { formatPatente } from '@/lib/patente';
 import { DailyServiceDispatchSplash } from './DailyServiceDispatchSplash';
+import { ResetSystemModal } from '@/features/settings/ResetSystemModal';
 
 const STATUS_CHART_COLORS: Record<string, string> = {
   operativo: '#10b981',
@@ -75,7 +77,8 @@ function DashboardTooltip({
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const { can } = useAuth();
+  const { can, profile } = useAuth();
+  const [resetModalOpen, setResetModalOpen] = useState(false);
   const { data: stats, isLoading } = useFleetStats();
   const { data: vehicles = [] } = useVehicles();
 
@@ -155,6 +158,16 @@ export function DashboardPage() {
                   Gestionar unidades
                 </Button>
               </>
+            )}
+            {(profile?.role === 'admin' || profile?.role === 'gerencia') && (
+              <Button
+                variant="danger"
+                icon={<RotateCcw className="h-4 w-4" />}
+                onClick={() => setResetModalOpen(true)}
+                title="Reiniciar y limpiar datos de prueba para comenzar en limpio"
+              >
+                Reiniciar de 0
+              </Button>
             )}
           </>
         }
@@ -456,6 +469,8 @@ export function DashboardPage() {
           )}
         </div>
       </div>
+
+      <ResetSystemModal open={resetModalOpen} onClose={() => setResetModalOpen(false)} />
     </div>
   );
 }

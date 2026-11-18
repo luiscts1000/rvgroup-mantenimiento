@@ -8,6 +8,7 @@ import { supabase, friendlyError } from '@/lib/supabase';
 import { formatDate } from '@/lib/utils';
 import { useCategories, useFleetStats, useImportBatches } from '@/features/vehicles/api';
 import type { AuditEntry, VehicleCategory } from '@/types/db';
+import { ResetSystemModal } from './ResetSystemModal';
 
 // Unidades FICTICIAS de demostración. Se registran con is_demo = true y la etiqueta [DATO DE DEMOSTRACIÓN].
 const DEMO_VEHICLES = [
@@ -24,19 +25,21 @@ const DEMO_VEHICLES = [
 export function SettingsPage() {
   const { profile, can } = useAuth();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<'categorias' | 'importaciones' | 'auditoria' | 'demo'>('categorias');
+  const isAdmin = profile?.role === 'admin';
+  const canReset = isAdmin || profile?.role === 'gerencia';
+  const canEdit = can('settings', 'edit');
+
+  const [tab, setTab] = useState<'categorias' | 'importaciones' | 'reiniciar' | 'auditoria' | 'demo'>('categorias');
   const { data: categories = [], isLoading: catLoading } = useCategories();
   const { data: batches = [], isLoading: batchLoading } = useImportBatches();
   const { data: stats } = useFleetStats();
   const [editingCat, setEditingCat] = useState<VehicleCategory | 'new' | null>(null);
   const [demoLoading, setDemoLoading] = useState(false);
   const [confirmClearDemo, setConfirmClearDemo] = useState(false);
+  const [resetModalOpen, setResetModalOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const [resetPassword, setResetPassword] = useState('');
   const [resetLoading, setResetLoading] = useState(false);
-
-  const isAdmin = profile?.role === 'admin';
-  const canEdit = can('settings', 'edit');
 
   const { data: audit = [], isLoading: auditLoading } = useQuery({
     queryKey: ['audit-all'],
@@ -94,13 +97,28 @@ export function SettingsPage() {
   const tabs = [
     { key: 'categorias', label: 'Categorías de unidades', icon: FolderTree },
     { key: 'importaciones', label: 'Historial de importaciones', icon: FileSpreadsheet },
+    ...(canReset ? [{ key: 'reiniciar', label: 'Limpiar / Reiniciar de cero', icon: RotateCcw }] : []),
     ...(isAdmin ? [{ key: 'auditoria', label: 'Registro de auditoría', icon: History }] : []),
     ...(isAdmin ? [{ key: 'demo', label: 'Datos de demostración', icon: Sparkles }] : []),
   ] as const;
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Configuración" subtitle="Parámetros del sistema, categorías, importaciones y auditoría" />
+      <PageHeader
+        title="Configuración"
+        subtitle="Parámetros del sistema, categorías, importaciones y reinicio operativo"
+        actions={
+          canReset && (
+            <Button
+              variant="danger"
+              icon={<RotateCcw className="h-4 w-4" />}
+              onClick={() => setResetModalOpen(true)}
+            >
+              Reiniciar sistema de 0
+            </Button>
+          )
+        }
+      />
 
       <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2 dark:border-slate-800">
         {tabs.map((t) => (
@@ -265,6 +283,69 @@ export function SettingsPage() {
         </div>
       )}
 
+      {/* Limpiar / Reiniciar Sistema (Pase a Producción) */}
+      {tab === 'reiniciar' && canReset && (
+        <div className="space-y-5">
+          <div className="card max-w-3xl space-y-4 border-2 border-red-500/20 bg-gradient-to-br from-red-50/50 via-white to-white p-6 dark:from-red-950/20 dark:via-slate-900 dark:to-slate-900">
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-600 text-white shadow-md">
+                <RotateCcw className="h-6 w-6" />
+              </div>
+              <div>
+                <h2 className="text-lg font-black text-slate-900 dark:text-white">
+                  Puesta en Marcha / Reiniciar Sistema desde Cero
+                </h2>
+                <p className="text-xs text-slate-500">
+                  Herramienta oficial de pase a producción para RV GROUP SRL
+                </p>
+              </div>
+            </div>
+
+            <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">
+              ¿Finalizó el período de pruebas y desea comenzar a cargar los datos reales de la empresa?
+              Esta herramienta le permite vaciar en un solo paso todas las <b>Órdenes de Reparación</b> de prueba
+              (reiniciando el contador a <code>OR-00001</code>), las fotografías, las inspecciones, los turnos y los movimientos de stock ficticios.
+            </p>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="rounded-xl border border-red-200 bg-white/80 p-3 text-xs text-slate-700 shadow-xs dark:border-red-900/40 dark:bg-slate-800/60 dark:text-slate-300">
+                <span className="font-bold text-red-700 dark:text-red-400">✔ Se eliminan y reinician:</span>
+                <ul className="mt-1 list-disc pl-4 space-y-0.5 text-slate-600 dark:text-slate-400">
+                  <li>Todas las Órdenes de Reparación y sus firmas digitales</li>
+                  <li>Fotografías de trabajos adjuntadas</li>
+                  <li>Contador de órdenes vuelve a <b>OR-00001</b></li>
+                  <li>Pendientes y turnos con talleres externos</li>
+                  <li>Inspecciones y checklists preventivos</li>
+                  <li>Movimientos de stock de prueba</li>
+                </ul>
+              </div>
+
+              <div className="rounded-xl border border-emerald-200 bg-white/80 p-3 text-xs text-slate-700 shadow-xs dark:border-emerald-900/40 dark:bg-slate-800/60 dark:text-slate-300">
+                <span className="font-bold text-emerald-700 dark:text-emerald-400">🔒 Se conservan siempre intactos:</span>
+                <ul className="mt-1 list-disc pl-4 space-y-0.5 text-slate-600 dark:text-slate-400">
+                  <li>Tu usuario, correo y contraseña de acceso</li>
+                  <li>Perfiles y roles del equipo (Admin, Gerencia, Mecánico)</li>
+                  <li><b>Tarifario Oficial de Mano de Obra ($)</b></li>
+                  <li>Categorías de vehículos de RV Group</li>
+                  <li>Opcionalmente podés conservar las patentes reales cargadas</li>
+                </ul>
+              </div>
+            </div>
+
+            <div className="pt-2">
+              <Button
+                variant="danger"
+                icon={<RotateCcw className="h-4 w-4" />}
+                onClick={() => setResetModalOpen(true)}
+                className="px-5 py-2.5 text-base shadow-sm"
+              >
+                Abrir herramienta de reinicio y comenzar de 0…
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Datos de demostración y Reseteo de pruebas (exclusivo Administrador) */}
       {tab === 'demo' && isAdmin && (
         <div className="space-y-5">
@@ -388,6 +469,15 @@ export function SettingsPage() {
           </div>
         </Modal>
       )}
+
+      <ResetSystemModal
+        open={resetModalOpen}
+        onClose={() => setResetModalOpen(false)}
+        onSuccess={() => {
+          setTab('categorias');
+          qc.invalidateQueries();
+        }}
+      />
     </div>
   );
 }
