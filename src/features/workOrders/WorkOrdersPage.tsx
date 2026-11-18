@@ -746,6 +746,16 @@ export function WorkOrdersPage() {
                               {formatNumber(o.kilometraje)} km
                             </div>
                           )}
+                          {o.labor_hours != null && o.labor_hours > 0 && (
+                            <div className="text-[11px] font-semibold text-brand-600 dark:text-brand-400">
+                              {o.labor_hours} Hs
+                            </div>
+                          )}
+                          {o.labor_cost != null && Number(o.labor_cost) > 0 && (
+                            <div className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                              $ {formatNumber(o.labor_cost)} MO
+                            </div>
+                          )}
                         </td>
                         <td>
                           <div>

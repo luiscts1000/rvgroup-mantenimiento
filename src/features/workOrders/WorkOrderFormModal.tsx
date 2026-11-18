@@ -723,7 +723,14 @@ export function WorkOrderFormModal({
                     inputMode="decimal"
                     placeholder="Ej.: 2.5"
                     value={laborHours}
-                    onChange={(e) => setLaborHours(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setLaborHours(val);
+                      const hs = parseFloat(val.replace(',', '.'));
+                      if (Number.isFinite(hs) && hs > 0 && hourlyRate > 0) {
+                        setLaborCost(String(Math.round(hs * hourlyRate)));
+                      }
+                    }}
                   />
                 </Field>
                 <Field label="Costo de mano de obra ($)">

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
@@ -18,12 +18,15 @@ import {
   Sparkles,
   Printer,
   PenTool,
+  DollarSign,
+  Package,
 } from 'lucide-react';
-import { Button, ConfirmDialog, EmptyState, Field, Spinner } from '@/components/ui';
+import { Button, ConfirmDialog, EmptyState, Field, Spinner, StatCard } from '@/components/ui';
 import { SignaturePadModal } from '@/components/ui/SignaturePadModal';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { useVehicle } from '@/features/vehicles/api';
 import { useParts } from '@/features/inventory/api';
+import { useLaborSettings, DEFAULT_HOURLY_RATE } from '@/features/services/laborRatesApi';
 import { friendlyError, supabase } from '@/lib/supabase';
 import {
   formatOrderNumber,
@@ -90,6 +93,9 @@ export function WorkOrderDetailPage() {
   const [photoToDelete, setPhotoToDelete] = useState<WorkOrderPhoto | null>(null);
   const [confirmApproveClose, setConfirmApproveClose] = useState(false);
 
+  const { data: laborSettings } = useLaborSettings();
+  const effectiveHourlyRate = laborSettings?.hourly_rate ?? DEFAULT_HOURLY_RATE;
+
   // Estado del panel rápido del Mecánico (Teléfono / Taller)
   const [showMechanicForm, setShowMechanicForm] = useState(false);
   const [kmInput, setKmInput] = useState('');
@@ -99,6 +105,7 @@ export function WorkOrderDetailPage() {
     { text: '', hours: '' },
   ]);
   const [totalHoursInput, setTotalHoursInput] = useState('');
+  const [laborCostInput, setLaborCostInput] = useState('');
   const [finishOption, setFinishOption] = useState<FinishCheckOption>('Reparado / Finalizado');
   const [obsInput, setObsInput] = useState('');
   const [draftItems, setDraftItems] = useState<ItemDraft[]>([]);
@@ -136,7 +143,29 @@ export function WorkOrderDetailPage() {
             { text: '', hours: '' },
           ],
     );
-    setTotalHoursInput(wo.labor_hours != null ? String(wo.labor_hours) : '');
+
+    const sumInitialHours = parsedLines.reduce((acc, r) => {
+      const n = parseFloat(r.hours.replace(',', '.'));
+      return Number.isFinite(n) && n > 0 ? acc + n : acc;
+    }, 0);
+
+    const initialFinalHours =
+      wo.labor_hours != null && wo.labor_hours > 0
+        ? wo.labor_hours
+        : sumInitialHours > 0
+          ? sumInitialHours
+          : null;
+
+    setTotalHoursInput(initialFinalHours != null ? String(initialFinalHours) : '');
+
+    const initialLaborCost =
+      wo.labor_cost != null && Number(wo.labor_cost) > 0
+        ? Number(wo.labor_cost)
+        : initialFinalHours != null && initialFinalHours > 0
+          ? Math.round(initialFinalHours * effectiveHourlyRate)
+          : null;
+
+    setLaborCostInput(initialLaborCost != null ? String(initialLaborCost) : '');
 
     const { cleanObs: obsWithoutSig, signatureDataUrl } = extractMechanicSignature(wo.observations);
     setMechanicSignature(signatureDataUrl);
@@ -155,7 +184,43 @@ export function WorkOrderDetailPage() {
     else if (checks.pendienteReparacion) setFinishOption('Pendiente de reparación');
     else if (checks.requiereRevisionPosterior) setFinishOption('Requiere revisión posterior');
     else setFinishOption('Reparado / Finalizado');
-  }, [wo, vehicle, profile?.role]);
+  }, [wo, vehicle, profile?.role, effectiveHourlyRate]);
+
+  // Actualizar una fila de trabajo y sincronizar automáticamente horas y costo de mano de obra
+  const updateWorkLine = (idx: number, patch: Partial<{ text: string; hours: string }>) => {
+    setWorkLines((prev) => {
+      const updated = prev.map((r, i) => (i === idx ? { ...r, ...patch } : r));
+      if (patch.hours !== undefined) {
+        const sum = updated.reduce((acc, r) => {
+          const n = parseFloat(r.hours.replace(',', '.'));
+          return Number.isFinite(n) && n > 0 ? acc + n : acc;
+        }, 0);
+        if (sum > 0) {
+          setTotalHoursInput(String(sum));
+          setLaborCostInput(String(Math.round(sum * effectiveHourlyRate)));
+        } else if (sum === 0 && !wo?.labor_hours) {
+          setTotalHoursInput('');
+          setLaborCostInput('');
+        }
+      }
+      return updated;
+    });
+  };
+
+  const removeWorkLine = (idx: number) => {
+    setWorkLines((prev) => {
+      const updated = prev.filter((_, i) => i !== idx);
+      const sum = updated.reduce((acc, r) => {
+        const n = parseFloat(r.hours.replace(',', '.'));
+        return Number.isFinite(n) && n > 0 ? acc + n : acc;
+      }, 0);
+      if (sum > 0) {
+        setTotalHoursInput(String(sum));
+        setLaborCostInput(String(Math.round(sum * effectiveHourlyRate)));
+      }
+      return updated;
+    });
+  };
 
   useEffect(() => {
     setDraftItems(
@@ -233,6 +298,12 @@ export function WorkOrderDetailPage() {
           ? sumHours
           : null;
 
+      const finalLaborCost = laborCostInput.trim()
+        ? parseFloat(laborCostInput.replace(/\./g, '').replace(',', '.'))
+        : finalHours != null && finalHours > 0
+          ? Math.round(finalHours * effectiveHourlyRate)
+          : null;
+
       let nextStatus: WorkOrderStatus = wo.status;
       if (markCompleted) {
         if (finishOption === 'Pendiente de repuesto') {
@@ -256,7 +327,8 @@ export function WorkOrderDetailPage() {
         values: {
           kilometraje: Number.isFinite(kmNum) ? kmNum : wo.kilometraje,
           work_performed: formattedLines || null,
-          labor_hours: finalHours != null && Number.isFinite(finalHours) ? finalHours : wo.labor_hours,
+          labor_hours: finalHours != null && Number.isFinite(finalHours) ? finalHours : null,
+          labor_cost: finalLaborCost != null && Number.isFinite(finalLaborCost) ? finalLaborCost : null,
           observations: taggedObs,
           status: nextStatus,
           mechanic_id: wo.mechanic_id || (profile?.role === 'mecanico' ? profile.id : null),
@@ -345,6 +417,54 @@ export function WorkOrderDetailPage() {
       : wo.kilometraje != null && wo.maintenance_type === 'preventivo'
         ? `${formatNumber(wo.kilometraje + 10000)} km`
         : '—';
+
+  // Suma de horas ocupadas de cada tarea detallada en la planilla
+  const sumHoursFromRows = useMemo(() => {
+    return sheetWorkRows.reduce((acc, r) => {
+      const m = r.hours.match(/(\d+(?:[.,]\d+)?)/);
+      if (m) {
+        const v = parseFloat(m[1].replace(',', '.'));
+        return Number.isFinite(v) ? acc + v : acc;
+      }
+      return acc;
+    }, 0);
+  }, [sheetWorkRows]);
+
+  const displayTotalHours =
+    wo.labor_hours != null && wo.labor_hours > 0
+      ? wo.labor_hours
+      : sumHoursFromRows > 0
+        ? sumHoursFromRows
+        : null;
+
+  const displayLaborCost =
+    wo.labor_cost != null && Number(wo.labor_cost) > 0
+      ? Number(wo.labor_cost)
+      : displayTotalHours != null && displayTotalHours > 0
+        ? Math.round(displayTotalHours * effectiveHourlyRate)
+        : 0;
+
+  const partsCost = useMemo(() => {
+    return items.reduce((sum, it) => {
+      const q = Number(it.quantity) || 0;
+      const c = it.unit_cost != null ? Number(it.unit_cost) : 0;
+      return sum + q * c;
+    }, 0);
+  }, [items]);
+
+  const totalOrderCost = partsCost + displayLaborCost;
+
+  // Suma de horas calculada para el formulario del mecánico
+  const calculatedSumHours = useMemo(() => {
+    return workLines.reduce((acc, r) => {
+      const n = parseFloat(r.hours.replace(',', '.'));
+      return Number.isFinite(n) && n > 0 ? acc + n : acc;
+    }, 0);
+  }, [workLines]);
+
+  const effectiveFinalHours = totalHoursInput.trim()
+    ? parseFloat(totalHoursInput.replace(',', '.')) || 0
+    : calculatedSumHours;
 
   const totalPartRows = Math.max(8, items.length);
 
@@ -503,9 +623,9 @@ export function WorkOrderDetailPage() {
             )}
           </div>
 
-          {/* 1. Kilómetros actuales y Próximo Service */}
-          <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <Field label="Kilometraje actual de la unidad (Km / Hs)" required>
+          {/* 1. Kilómetros actuales, Próximo Service, Horas Ocupadas y Costo Mano de Obra */}
+          <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Field label="Kilometraje actual (Km / Hs)" required>
               <div className="relative">
                 <Gauge className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-brand-600" />
                 <input
@@ -519,7 +639,7 @@ export function WorkOrderDetailPage() {
                 />
               </div>
             </Field>
-            <Field label="Próximo Service (Km) — Opcional">
+            <Field label="Próximo Service (Km)">
               <div className="flex gap-1.5">
                 <input
                   type="number"
@@ -535,13 +655,16 @@ export function WorkOrderDetailPage() {
                     const base = parseInt(kmInput || '0', 10) || vehicle?.km_actual || 0;
                     setNextServiceKmInput(String(base + 10000));
                   }}
-                  className="shrink-0 rounded-xl border border-brand-300 bg-brand-50 px-2.5 text-xs font-bold text-brand-700 hover:bg-brand-600 hover:text-white dark:border-brand-700 dark:bg-brand-950 dark:text-brand-300"
+                  className="shrink-0 rounded-xl border border-brand-300 bg-brand-50 px-2 text-xs font-bold text-brand-700 hover:bg-brand-600 hover:text-white dark:border-brand-700 dark:bg-brand-950 dark:text-brand-300"
                 >
-                  +10.000 km
+                  +10k
                 </button>
               </div>
             </Field>
-            <Field label="Total Horas Ocupadas (Hs)">
+            <Field
+              label="Total Horas Ocupadas (Hs)"
+              hint={calculatedSumHours > 0 ? `Suma de filas: ${calculatedSumHours} Hs` : 'Suma de cada tarea'}
+            >
               <div className="relative">
                 <Clock className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                 <input
@@ -552,7 +675,34 @@ export function WorkOrderDetailPage() {
                   className="input pl-9 font-semibold"
                   placeholder="Ej.: 2.5"
                   value={totalHoursInput}
-                  onChange={(e) => setTotalHoursInput(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setTotalHoursInput(val);
+                    const n = parseFloat(val.replace(',', '.'));
+                    if (Number.isFinite(n) && n > 0) {
+                      setLaborCostInput(String(Math.round(n * effectiveHourlyRate)));
+                    }
+                  }}
+                />
+              </div>
+            </Field>
+            <Field
+              label="Costo Mano de Obra ($)"
+              hint={
+                effectiveFinalHours > 0
+                  ? `${effectiveFinalHours} Hs × $ ${formatNumber(effectiveHourlyRate)}/h`
+                  : `Tarifa: $ ${formatNumber(effectiveHourlyRate)}/h`
+              }
+            >
+              <div className="relative">
+                <DollarSign className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-emerald-600" />
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  className="input pl-9 font-bold text-emerald-700 dark:text-emerald-400"
+                  placeholder="Ej.: 84000"
+                  value={laborCostInput}
+                  onChange={(e) => setLaborCostInput(e.target.value)}
                 />
               </div>
             </Field>
@@ -590,27 +740,19 @@ export function WorkOrderDetailPage() {
                         : 'Otro trabajo extra realizado o ajuste detectado en el vehículo…'
                     }
                     value={row.text}
-                    onChange={(e) =>
-                      setWorkLines((prev) =>
-                        prev.map((r, i) => (i === idx ? { ...r, text: e.target.value } : r)),
-                      )
-                    }
+                    onChange={(e) => updateWorkLine(idx, { text: e.target.value })}
                   />
                   <input
-                    className="input w-24 text-center"
-                    placeholder="Hs"
+                    className="input w-24 text-center font-semibold"
+                    placeholder="Hs (ej: 2)"
                     inputMode="decimal"
                     value={row.hours}
-                    onChange={(e) =>
-                      setWorkLines((prev) =>
-                        prev.map((r, i) => (i === idx ? { ...r, hours: e.target.value } : r)),
-                      )
-                    }
+                    onChange={(e) => updateWorkLine(idx, { hours: e.target.value })}
                   />
                   {workLines.length > 1 && (
                     <button
                       type="button"
-                      onClick={() => setWorkLines((prev) => prev.filter((_, i) => i !== idx))}
+                      onClick={() => removeWorkLine(idx)}
                       className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
                       title="Quitar renglón"
                     >
@@ -620,6 +762,27 @@ export function WorkOrderDetailPage() {
                 </div>
               ))}
             </div>
+
+            {calculatedSumHours > 0 && (
+              <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-brand-200 bg-brand-50/80 p-2.5 text-xs dark:border-brand-900/50 dark:bg-brand-950/30">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-slate-700 dark:text-slate-300">
+                    Suma total de horas ocupadas:
+                  </span>
+                  <span className="inline-flex items-center rounded-lg bg-brand-600 px-2 py-0.5 font-mono text-sm font-extrabold text-white">
+                    {calculatedSumHours} Hs
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-slate-700 dark:text-slate-300">
+                    Mano de obra calculada ({calculatedSumHours} Hs × $ {formatNumber(effectiveHourlyRate)}):
+                  </span>
+                  <span className="inline-flex items-center rounded-lg bg-emerald-600 px-2 py-0.5 font-mono text-sm font-extrabold text-white">
+                    $ {formatNumber(Math.round(calculatedSumHours * effectiveHourlyRate))}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 3. Repuestos y Materiales Utilizados (Sección 4 de la OT) */}
@@ -855,6 +1018,38 @@ export function WorkOrderDetailPage() {
         </form>
       )}
 
+      {/* Resumen Económico y Costos de la Orden */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatCard
+          label="Horas de trabajo"
+          value={displayTotalHours != null ? `${displayTotalHours} Hs` : '0 Hs'}
+          hint={sheetWorkRows.filter((r) => r.text).length ? `${sheetWorkRows.filter((r) => r.text).length} tareas detalladas` : 'Sin tareas'}
+          icon={<Clock className="h-5 w-5" />}
+          tone="brand"
+        />
+        <StatCard
+          label="Mano de obra"
+          value={`$ ${formatNumber(displayLaborCost)}`}
+          hint={`Tarifa base: $ ${formatNumber(effectiveHourlyRate)}/h`}
+          icon={<Wrench className="h-5 w-5" />}
+          tone={displayLaborCost > 0 ? 'green' : 'slate'}
+        />
+        <StatCard
+          label="Repuestos e insumos"
+          value={`$ ${formatNumber(partsCost)}`}
+          hint={`${items.length} repuestos cargados`}
+          icon={<Package className="h-5 w-5" />}
+          tone={partsCost > 0 ? 'green' : 'slate'}
+        />
+        <StatCard
+          label="Costo total de la OR"
+          value={`$ ${formatNumber(totalOrderCost)}`}
+          hint="Mano de obra + repuestos"
+          icon={<DollarSign className="h-5 w-5" />}
+          tone="brand"
+        />
+      </div>
+
       {/* ========================================================================
           HOJA OFICIAL EN PANTALLA: REGISTRO DE TRABAJO MECÁNICO (F02-PGV-02 rev0)
          ======================================================================== */}
@@ -1010,9 +1205,19 @@ export function WorkOrderDetailPage() {
                     TOTAL HORAS TRABAJADAS:
                   </td>
                   <td className="px-3 py-2 text-center font-mono text-sm">
-                    {wo.labor_hours != null ? `${wo.labor_hours} Hs` : '______ Hs'}
+                    {displayTotalHours != null ? `${displayTotalHours} Hs` : '______ Hs'}
                   </td>
                 </tr>
+                {displayLaborCost > 0 && (
+                  <tr className="bg-slate-100/90 font-extrabold text-slate-900 dark:bg-slate-800 dark:text-slate-100">
+                    <td className="border-r border-slate-500 px-3 py-2 text-right text-xs">
+                      VALOR COMPUTADO MANO DE OBRA ({displayTotalHours ?? 0} Hs × $ {formatNumber(effectiveHourlyRate)}/Hs):
+                    </td>
+                    <td className="px-3 py-2 text-center font-mono text-sm text-emerald-700 dark:text-emerald-400">
+                      $ {formatNumber(displayLaborCost)}
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -1053,9 +1258,31 @@ export function WorkOrderDetailPage() {
                     </tr>
                   );
                 })}
+                {partsCost > 0 && (
+                  <tr className="bg-slate-100/90 font-extrabold text-slate-900 dark:bg-slate-800 dark:text-slate-100">
+                    <td className="border-r border-slate-500 px-3 py-1.5 text-center font-mono text-xs">
+                      {items.length} rep.
+                    </td>
+                    <td className="border-r border-slate-500 px-3 py-1.5 text-right text-xs">
+                      SUBTOTAL REPUESTOS E INSUMOS:
+                    </td>
+                    <td className="px-3 py-1.5 font-mono text-xs font-extrabold text-emerald-700 dark:text-emerald-400">
+                      $ {formatNumber(partsCost)}
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
+
+          {totalOrderCost > 0 && (
+            <div className="mt-1 flex items-center justify-between border border-slate-500 bg-slate-900 px-4 py-2 text-xs font-extrabold text-white">
+              <span>COSTO TOTAL VALORIZADO DE LA ORDEN (REPUESTOS + MANO DE OBRA):</span>
+              <span className="font-mono text-base text-rvgreen-400">
+                $ {formatNumber(totalOrderCost)}
+              </span>
+            </div>
+          )}
 
           {/* 5. ESTADO DEL TRABAJO AL FINALIZAR */}
           <div className="mt-3 bg-[#2b3c4e] px-3 py-1.5 text-xs font-extrabold text-white uppercase">

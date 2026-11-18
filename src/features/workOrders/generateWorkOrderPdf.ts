@@ -96,7 +96,7 @@ export function splitWorkLines(wo: WorkOrder): { text: string; hours: string }[]
   for (const item of parsed) {
     let text = item;
     let hours = '';
-    const m = item.match(/^(.*?)\s*[\[\(](\d+(?:[.,]\d+)?)\s*h(?:s|oras)?[\]\)]\s*$/i);
+    const m = item.match(/^(.*?)(?:\s*[\[\(]|\s*[-:]\s*|\s+)(\d+(?:[.,]\d+)?)\s*h(?:s|oras)?[\]\)]?\s*$/i);
     if (m) {
       text = m[1].trim();
       hours = `${m[2]} Hs`;
@@ -214,6 +214,30 @@ function buildDefinition(
 
   // 5 filas de trabajo realizado
   const workRows = splitWorkLines(wo);
+
+  // Sumar horas ocupadas de cada tarea detallada si wo.labor_hours no fue definido
+  const sumWorkHours = workRows.reduce((acc, r) => {
+    const m = r.hours.match(/(\d+(?:[.,]\d+)?)/);
+    if (m) {
+      const n = parseFloat(m[1].replace(',', '.'));
+      return Number.isFinite(n) ? acc + n : acc;
+    }
+    return acc;
+  }, 0);
+  const pdfTotalHours =
+    wo.labor_hours != null && wo.labor_hours > 0
+      ? wo.labor_hours
+      : sumWorkHours > 0
+        ? sumWorkHours
+        : null;
+
+  const hourlyRateRef = 28000;
+  const displayLaborCost =
+    wo.labor_cost != null && Number(wo.labor_cost) > 0
+      ? Number(wo.labor_cost)
+      : pdfTotalHours != null && pdfTotalHours > 0
+        ? Math.round(pdfTotalHours * hourlyRateRef)
+        : 0;
 
   // 5 filas de repuestos e insumos (óptimo para 1 sola hoja física)
   const totalPartRows = Math.max(5, items.length);
@@ -565,7 +589,7 @@ function buildDefinition(
                 margin: [4, 2, 6, 2],
               },
               {
-                text: wo.labor_hours != null ? `${wo.labor_hours} Hs` : '______ Hs',
+                text: pdfTotalHours != null ? `${pdfTotalHours} Hs` : '______ Hs',
                 bold: true,
                 fontSize: 7.5,
                 alignment: 'center',
@@ -573,6 +597,28 @@ function buildDefinition(
                 margin: [2, 2, 2, 2],
               },
             ],
+            ...(displayLaborCost > 0
+              ? [
+                  [
+                    {
+                      text: `VALOR MANO DE OBRA ESTIMADA (${pdfTotalHours ?? 0} Hs × $ ${formatNumber(hourlyRateRef)}/h):`,
+                      bold: true,
+                      fontSize: 7,
+                      alignment: 'right' as const,
+                      fillColor: '#f1f5f9',
+                      margin: [4, 1.8, 6, 1.8] as [number, number, number, number],
+                    },
+                    {
+                      text: `$ ${formatNumber(displayLaborCost)}`,
+                      bold: true,
+                      fontSize: 7.5,
+                      alignment: 'center' as const,
+                      fillColor: '#f1f5f9',
+                      margin: [2, 1.8, 2, 1.8] as [number, number, number, number],
+                    },
+                  ],
+                ]
+              : []),
           ],
         },
         layout: gridLayout,
