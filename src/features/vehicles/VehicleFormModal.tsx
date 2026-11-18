@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { toast } from 'sonner';
-import { Save } from 'lucide-react';
+import { Save, Plus } from 'lucide-react';
 import { Button, Field, Modal } from '@/components/ui';
 import { checkPatente, normalizePatente } from '@/lib/patente';
 import { friendlyError, supabase } from '@/lib/supabase';
@@ -81,9 +82,13 @@ export function VehicleFormModal({
   onSaved?: (v: Vehicle) => void;
 }) {
   const { can } = useAuth();
+  const qc = useQueryClient();
   const { data: categories = [] } = useCategories();
   const save = useSaveVehicle();
   const [dupWarning, setDupWarning] = useState<string | null>(null);
+  const [showQuickCat, setShowQuickCat] = useState(false);
+  const [quickCatName, setQuickCatName] = useState('');
+  const [creatingCat, setCreatingCat] = useState(false);
   const {
     register,
     handleSubmit,
@@ -114,13 +119,77 @@ export function VehicleFormModal({
     return () => clearTimeout(t);
   }, [patente, open, vehicle?.patente]);
 
+  const handleCreateQuickCategory = async () => {
+    const raw = quickCatName.trim();
+    if (!raw) return;
+    setCreatingCat(true);
+    try {
+      let brand: string | null = null;
+      let model: string | null = null;
+      let version: string | null = null;
+      const lower = raw.toLowerCase();
+
+      if (lower.includes('hilux')) {
+        brand = 'Toyota';
+        model = 'Hilux';
+        if (lower.includes('2.4')) version = '2.4';
+        else if (lower.includes('2.8')) version = '2.8';
+      } else if (lower.includes('ranger')) {
+        brand = 'Ford';
+        model = 'Ranger';
+        if (lower.includes('2.0')) version = '2.0';
+        else if (lower.includes('2.2')) version = '2.2';
+        else if (lower.includes('3.2')) version = '3.2';
+      } else if (lower.includes('sprinter')) {
+        brand = 'Mercedes-Benz';
+        model = 'Sprinter';
+        const m = raw.match(/\b(414|415|416|515|516|517)\b/);
+        if (m) version = m[1];
+      }
+
+      const { data, error } = await supabase
+        .from('vehicle_categories')
+        .insert({
+          name: raw,
+          brand,
+          model,
+          version,
+          sort_order: 35,
+          active: true,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      await qc.invalidateQueries({ queryKey: ['categories'] });
+      setValue('category_id', data.id);
+      onCategoryChange(data.id);
+      toast.success(`Categoría "${raw}" creada`);
+      setQuickCatName('');
+      setShowQuickCat(false);
+    } catch (err) {
+      toast.error(friendlyError(err));
+    } finally {
+      setCreatingCat(false);
+    }
+  };
+
   // Al elegir categoría se completan marca/modelo/versión si están vacíos
   const onCategoryChange = (id: string) => {
     const c = categories.find((x) => x.id === id);
     if (!c) return;
-    if (!watch('marca') && c.brand) setValue('marca', c.brand);
-    if (!watch('modelo') && c.model) setValue('modelo', c.model);
-    if (!watch('version') && c.version) setValue('version', c.version);
+    if (c.brand) setValue('marca', c.brand);
+    if (c.model) setValue('modelo', c.model);
+    if (c.version) setValue('version', c.version);
+    if (!watch('vehicle_type')) {
+      const lower = c.name.toLowerCase();
+      if (lower.includes('ranger') || lower.includes('hilux') || lower.includes('pick-up')) {
+        setValue('vehicle_type', 'Pick-up');
+      } else if (lower.includes('sprinter') || lower.includes('minibus')) {
+        setValue('vehicle_type', 'Minibús');
+      }
+    }
   };
 
   const onSubmit = async (f: FormValues) => {
@@ -210,7 +279,19 @@ export function VehicleFormModal({
         <section>
           <h3 className="mb-3 text-sm font-semibold text-brand-700 dark:text-brand-300">Vehículo</h3>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <Field label="Categoría" className="sm:col-span-3">
+            <div className="sm:col-span-3">
+              <div className="mb-1 flex items-center justify-between">
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Categoría</label>
+                {can('settings', 'create') && (
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickCat(!showQuickCat)}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-brand-600 hover:text-brand-700 dark:text-brand-400"
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Nueva categoría
+                  </button>
+                )}
+              </div>
               <select
                 className="input"
                 {...register('category_id', { onChange: (e) => onCategoryChange(e.target.value) })}
@@ -224,7 +305,46 @@ export function VehicleFormModal({
                     </option>
                   ))}
               </select>
-            </Field>
+
+              {showQuickCat && (
+                <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-brand-200 bg-brand-50/70 p-2.5 dark:border-brand-900/40 dark:bg-brand-950/30">
+                  <input
+                    type="text"
+                    className="input h-9 flex-1 min-w-[200px] text-xs"
+                    placeholder="Ej.: Toyota Hilux, Amarok V6, etc."
+                    value={quickCatName}
+                    onChange={(e) => setQuickCatName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        void handleCreateQuickCategory();
+                      }
+                    }}
+                    autoFocus
+                  />
+                  <Button
+                    size="sm"
+                    type="button"
+                    onClick={handleCreateQuickCategory}
+                    loading={creatingCat}
+                    disabled={!quickCatName.trim()}
+                  >
+                    Guardar y seleccionar
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    type="button"
+                    onClick={() => {
+                      setShowQuickCat(false);
+                      setQuickCatName('');
+                    }}
+                  >
+                    Cancelar
+                  </Button>
+                </div>
+              )}
+            </div>
             <Field label="Marca">
               <input className="input" {...register('marca')} />
             </Field>

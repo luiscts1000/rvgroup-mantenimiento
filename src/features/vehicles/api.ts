@@ -38,13 +38,34 @@ export function useVehicle(id: string | undefined) {
   });
 }
 
+const STANDARD_HILUX_CATEGORIES = [
+  { name: 'Toyota Hilux', brand: 'Toyota', model: 'Hilux', version: null, sort_order: 25 },
+  { name: 'Toyota Hilux 2.4', brand: 'Toyota', model: 'Hilux', version: '2.4', sort_order: 26 },
+  { name: 'Toyota Hilux 2.8', brand: 'Toyota', model: 'Hilux', version: '2.8', sort_order: 27 },
+];
+
 export function useCategories() {
   return useQuery({
     queryKey: ['categories'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('vehicle_categories').select('*').order('sort_order').order('name');
+      let { data, error } = await supabase.from('vehicle_categories').select('*').order('sort_order').order('name');
       if (error) throw error;
-      return data as VehicleCategory[];
+
+      // Asegurar automáticamente que las categorías de Toyota Hilux existan en la base de datos
+      const hasHilux = (data ?? []).some((c) => c.name.toLowerCase().includes('hilux'));
+      if (!hasHilux) {
+        try {
+          await supabase.from('vehicle_categories').upsert(STANDARD_HILUX_CATEGORIES, { onConflict: 'name' });
+          const refetch = await supabase.from('vehicle_categories').select('*').order('sort_order').order('name');
+          if (refetch.data && refetch.data.length > 0) {
+            data = refetch.data;
+          }
+        } catch {
+          // Si falla por RLS o conectividad, continuar con las categorías existentes
+        }
+      }
+
+      return (data as VehicleCategory[]) ?? [];
     },
   });
 }
