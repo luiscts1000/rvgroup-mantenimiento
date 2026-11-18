@@ -4,6 +4,13 @@ import * as XLSX from 'xlsx';
 import { supabase } from '@/lib/supabase';
 import { CHECK_ITEM_LABELS, RTO_CHECKLIST_ITEMS, STATUS_LABELS } from '@/lib/constants';
 import { formatPatente } from '@/lib/patente';
+import {
+  injectProvincialRtoInText,
+  isMissingProvincialRtoColumnError,
+  normalizeInspectionProvincialRto,
+  setLocalInspectionProvincialRto,
+  setLocalProvincialRto,
+} from '@/lib/rtoProvincialStorage';
 import type { CheckItemState, PreventiveInspection, Vehicle } from '@/types/db';
 
 const INSPECTIONS_KEY = ['preventive-inspections'];
@@ -150,7 +157,7 @@ export function useInspections(vehicleId?: string) {
       if (vehicleId) q = q.eq('vehicle_id', vehicleId);
       const { data, error } = await q;
       if (error) throw error;
-      return (data ?? []) as PreventiveInspection[];
+      return ((data ?? []) as PreventiveInspection[]).map(normalizeInspectionProvincialRto);
     },
   });
 }
@@ -187,16 +194,48 @@ export function useCreateInspection() {
   return useMutation({
     mutationFn: async (input: CreateInspectionInput) => {
       const { generate_pending, ...payload } = input;
+      const payloadWithObs = {
+        ...payload,
+        observations: payload.rto_provincial_due_date
+          ? injectProvincialRtoInText(payload.observations, payload.rto_provincial_due_date)
+          : payload.observations,
+      };
       const { data, error } = await supabase.rpc('create_inspection_with_pendings', {
-        p_inspection: payload,
+        p_inspection: payloadWithObs,
         p_generate_pending: generate_pending,
       });
       if (error) throw error;
-      return data as {
+
+      const res = data as {
         inspection_id: string;
         ready_for_rto: boolean;
         generated_pendings: number;
       };
+
+      if (input.rto_provincial_due_date) {
+        setLocalInspectionProvincialRto(res.inspection_id, input.rto_provincial_due_date);
+        setLocalProvincialRto(input.vehicle_id, input.rto_provincial_due_date);
+
+        const { error: vehErr } = await supabase
+          .from('vehicles')
+          .update({ rto_provincial_due_date: input.rto_provincial_due_date })
+          .eq('id', input.vehicle_id);
+
+        if (vehErr && isMissingProvincialRtoColumnError(vehErr)) {
+          const { data: curr } = await supabase
+            .from('vehicles')
+            .select('observaciones')
+            .eq('id', input.vehicle_id)
+            .single();
+          const baseObs = (curr as { observaciones?: string | null } | null)?.observaciones ?? null;
+          await supabase
+            .from('vehicles')
+            .update({ observaciones: injectProvincialRtoInText(baseObs, input.rto_provincial_due_date) })
+            .eq('id', input.vehicle_id);
+        }
+      }
+
+      return res;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: INSPECTIONS_KEY });
@@ -234,8 +273,27 @@ export function useUpdateVehiclePreventive() {
   return useMutation({
     mutationFn: async (input: UpdateVehiclePreventiveInput) => {
       const { id, ...patch } = input;
+      if (patch.rto_provincial_due_date !== undefined) {
+        setLocalProvincialRto(id, patch.rto_provincial_due_date);
+      }
+
       const { error } = await supabase.from('vehicles').update(patch).eq('id', id);
-      if (error) throw error;
+      if (!error) return;
+
+      if (isMissingProvincialRtoColumnError(error)) {
+        const { rto_provincial_due_date, ...restPatch } = patch;
+        const { data: curr } = await supabase.from('vehicles').select('observaciones').eq('id', id).single();
+        const baseObs = (curr as { observaciones?: string | null } | null)?.observaciones ?? null;
+        const fallbackPatch = {
+          ...restPatch,
+          observaciones: injectProvincialRtoInText(baseObs, rto_provincial_due_date),
+        };
+        const { error: retryErr } = await supabase.from('vehicles').update(fallbackPatch).eq('id', id);
+        if (retryErr) throw retryErr;
+        return;
+      }
+
+      throw error;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['vehicles'] });

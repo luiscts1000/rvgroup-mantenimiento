@@ -1,6 +1,12 @@
 import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import {
+  injectProvincialRtoInText,
+  isMissingProvincialRtoColumnError,
+  normalizeVehicleProvincialRto,
+  setLocalProvincialRto,
+} from '@/lib/rtoProvincialStorage';
 import type { AuditEntry, FleetStats, ImportBatch, Vehicle, VehicleCategory, VehicleInput } from '@/types/db';
 import type { ExistingKeys } from './importLogic';
 
@@ -16,7 +22,7 @@ async function fetchAllVehicles(): Promise<Vehicle[]> {
       .order('patente')
       .range(from, from + PAGE - 1);
     if (error) throw error;
-    out.push(...((data ?? []) as Vehicle[]));
+    out.push(...((data ?? []) as Vehicle[]).map(normalizeVehicleProvincialRto));
     if (!data || data.length < PAGE) break;
   }
   return out;
@@ -33,7 +39,7 @@ export function useVehicle(id: string | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase.from('vehicles').select('*, vehicle_categories(name)').eq('id', id!).single();
       if (error) throw error;
-      return data as Vehicle;
+      return normalizeVehicleProvincialRto(data as Vehicle);
     },
   });
 }
@@ -118,14 +124,67 @@ export function useSaveVehicle() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, values }: { id?: string; values: Partial<VehicleInput> }) => {
+      if (id && values.rto_provincial_due_date !== undefined) {
+        setLocalProvincialRto(id, values.rto_provincial_due_date);
+      }
+
       if (id) {
         const { data, error } = await supabase.from('vehicles').update(values).eq('id', id).select().single();
-        if (error) throw error;
-        return data as Vehicle;
+        if (!error) return normalizeVehicleProvincialRto(data as Vehicle);
+
+        if (isMissingProvincialRtoColumnError(error)) {
+          const { rto_provincial_due_date, ...rest } = values;
+          let baseObs = rest.observaciones;
+          if (baseObs === undefined) {
+            const { data: curr } = await supabase.from('vehicles').select('observaciones').eq('id', id).single();
+            baseObs = (curr as { observaciones?: string | null } | null)?.observaciones ?? null;
+          }
+          const fallbackPayload = {
+            ...rest,
+            observaciones: injectProvincialRtoInText(baseObs, rto_provincial_due_date),
+          };
+          const { data: retryData, error: retryError } = await supabase
+            .from('vehicles')
+            .update(fallbackPayload)
+            .eq('id', id)
+            .select()
+            .single();
+          if (retryError) throw retryError;
+          return normalizeVehicleProvincialRto(retryData as Vehicle);
+        }
+
+        throw error;
       }
+
       const { data, error } = await supabase.from('vehicles').insert(values).select().single();
-      if (error) throw error;
-      return data as Vehicle;
+      if (!error) {
+        const created = data as Vehicle;
+        if (values.rto_provincial_due_date !== undefined) {
+          setLocalProvincialRto(created.id, values.rto_provincial_due_date);
+        }
+        return normalizeVehicleProvincialRto(created);
+      }
+
+      if (isMissingProvincialRtoColumnError(error)) {
+        const { rto_provincial_due_date, ...rest } = values;
+        const fallbackPayload = {
+          ...rest,
+          observaciones: injectProvincialRtoInText(rest.observaciones, rto_provincial_due_date),
+        };
+        const { data: retryData, error: retryError } = await supabase
+          .from('vehicles')
+          .insert(fallbackPayload)
+          .select()
+          .single();
+        if (retryError) throw retryError;
+        const created = retryData as Vehicle;
+        if (rto_provincial_due_date !== undefined) {
+          setLocalProvincialRto(created.id, rto_provincial_due_date);
+        }
+        return normalizeVehicleProvincialRto(created);
+      }
+
+      throw error;
     },
     onSuccess: (v) => {
       qc.invalidateQueries({ queryKey: ['vehicles'] });
