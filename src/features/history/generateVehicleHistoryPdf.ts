@@ -11,6 +11,7 @@ import {
 } from '@/lib/constants';
 import { formatPatente } from '@/lib/patente';
 import { formatDate, formatNumber } from '@/lib/utils';
+import { supportsProvincialRto } from '@/features/preventive/api';
 import type { Appointment, PendingTask, PreventiveInspection, Vehicle, WorkOrder } from '@/types/db';
 import type { EnrichedWorkOrderItem, KeyInterventionRecord } from './api';
 
@@ -133,7 +134,14 @@ export async function generateVehicleHistoryPdf(params: {
                     kv('Año', vehicle.anio ? String(vehicle.anio) : '—'),
                     kv('Kilometraje actual', vehicle.km_actual != null ? `${formatNumber(vehicle.km_actual)} km` : '—'),
                     kv('Medida cubiertas', vehicle.tire_type_size || '—'),
-                    kv('Vencimiento RTO', vehicle.rto_due_date ? formatDate(vehicle.rto_due_date) : '—'),
+                    supportsProvincialRto(vehicle)
+                      ? kv(
+                          'RTO Nac / Prov',
+                          `${vehicle.rto_due_date ? formatDate(vehicle.rto_due_date) : '—'} / ${
+                            vehicle.rto_provincial_due_date ? formatDate(vehicle.rto_provincial_due_date) : '—'
+                          }`,
+                        )
+                      : kv('Vencimiento RTO', vehicle.rto_due_date ? formatDate(vehicle.rto_due_date) : '—'),
                   ],
                 ],
               },

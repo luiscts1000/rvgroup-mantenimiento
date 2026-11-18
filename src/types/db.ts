@@ -109,6 +109,7 @@ export interface Vehicle {
   status: VehicleStatus;
   observaciones: string | null;
   rto_due_date?: string | null;
+  rto_provincial_due_date?: string | null;
   service_interval_km?: number | null;
   last_service_km?: number | null;
   last_service_date?: string | null;
@@ -403,6 +404,7 @@ export interface PreventiveInspection {
   inspector_name: string | null;
   kilometraje: number | null;
   rto_due_date: string | null;
+  rto_provincial_due_date?: string | null;
   windshield_state: CheckItemState;
   windshield_notes: string | null;
   tires_state: CheckItemState;

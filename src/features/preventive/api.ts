@@ -161,6 +161,7 @@ export interface CreateInspectionInput {
   inspector_name?: string | null;
   kilometraje?: number | null;
   rto_due_date?: string | null;
+  rto_provincial_due_date?: string | null;
   windshield_state: CheckItemState;
   windshield_notes?: string | null;
   tires_state: CheckItemState;
@@ -210,6 +211,7 @@ export function useCreateInspection() {
 export interface UpdateVehiclePreventiveInput {
   id: string;
   rto_due_date?: string | null;
+  rto_provincial_due_date?: string | null;
   service_interval_km?: number | null;
   last_service_km?: number | null;
   last_service_date?: string | null;
@@ -304,6 +306,106 @@ export function getRtoStatus(rtoDueDate?: string | null): {
   };
 }
 
+/** Determina si una unidad es Sprinter o Minibús y por ende requiere RTO Nacional y Provincial */
+export function supportsProvincialRto(v?: {
+  vehicle_type?: string | null;
+  marca?: string | null;
+  modelo?: string | null;
+  version?: string | null;
+  category_id?: string | null;
+  vehicle_categories?: { name?: string } | null;
+} | null): boolean {
+  if (!v) return false;
+  const raw = `${v.vehicle_type ?? ''} ${v.marca ?? ''} ${v.modelo ?? ''} ${v.version ?? ''} ${v.vehicle_categories?.name ?? ''}`.toLowerCase();
+  return (
+    raw.includes('sprinter') ||
+    raw.includes('minibus') ||
+    raw.includes('minibús') ||
+    raw.includes('mercedes') ||
+    raw.includes('916') ||
+    raw.includes('furgon') ||
+    raw.includes('furgón')
+  );
+}
+
+/** Evalúa el estado conjunto de RTO Nacional y Provincial para la unidad */
+export function getCombinedRtoStatus(v: {
+  rto_due_date?: string | null;
+  rto_provincial_due_date?: string | null;
+  vehicle_type?: string | null;
+  marca?: string | null;
+  modelo?: string | null;
+  version?: string | null;
+  vehicle_categories?: { name?: string } | null;
+}) {
+  const isDual = supportsProvincialRto(v);
+  const nac = getRtoStatus(v.rto_due_date);
+  const prov = isDual && v.rto_provincial_due_date ? getRtoStatus(v.rto_provincial_due_date) : null;
+
+  if (!isDual) {
+    return {
+      code: nac.code,
+      label: `RTO Nac: ${nac.label}`,
+      nacional: nac,
+      provincial: null,
+      isDual: false,
+      worstStatus: nac,
+    };
+  }
+
+  if (nac.code === 'vencida' || prov?.code === 'vencida') {
+    const expiredLabel =
+      nac.code === 'vencida' && prov?.code === 'vencida'
+        ? 'RTO Nac y Prov vencidas'
+        : nac.code === 'vencida'
+          ? `RTO Nac vencida (${Math.abs(nac.daysDiff ?? 0)} d)`
+          : `RTO Prov vencida (${Math.abs(prov?.daysDiff ?? 0)} d)`;
+    return {
+      code: 'vencida' as const,
+      label: expiredLabel,
+      nacional: nac,
+      provincial: prov,
+      isDual: true,
+      worstStatus: nac.code === 'vencida' ? nac : prov!,
+    };
+  }
+
+  if (nac.code === 'proxima' || prov?.code === 'proxima') {
+    const proxLabel =
+      nac.code === 'proxima'
+        ? `RTO Nac vence en ${nac.daysDiff} d`
+        : `RTO Prov vence en ${prov?.daysDiff} d`;
+    return {
+      code: 'proxima' as const,
+      label: proxLabel,
+      nacional: nac,
+      provincial: prov,
+      isDual: true,
+      worstStatus: nac.code === 'proxima' ? nac : prov!,
+    };
+  }
+
+  if (nac.code === 'vigente' || prov?.code === 'vigente') {
+    return {
+      code: 'vigente' as const,
+      label: 'RTOs vigentes',
+      nacional: nac,
+      provincial: prov,
+      isDual: true,
+      worstStatus: nac.code === 'vigente' ? nac : (prov ?? nac),
+    };
+  }
+
+  return {
+    code: 'sin_fecha' as const,
+    label: 'Sin RTO cargada',
+    nacional: nac,
+    provincial: prov,
+    isDual: true,
+    worstStatus: nac,
+  };
+}
+
 export function getServiceKmStatus(v: Vehicle): {
   code: 'vencido' | 'proximo' | 'al_dia' | 'sin_datos';
   label: string;
@@ -374,7 +476,8 @@ export function exportPreventiveToExcel(vehicles: Vehicle[], inspections: Preven
       return ra - rb;
     })
     .map((v) => {
-      const rto = getRtoStatus(v.rto_due_date);
+      const isDual = supportsProvincialRto(v);
+      const combined = getCombinedRtoStatus(v);
       const svc = getServiceKmStatus(v);
       const lastInsp = latestByVehicle.get(v.id);
       return {
@@ -394,8 +497,10 @@ export function exportPreventiveToExcel(vehicles: Vehicle[], inspections: Preven
         'Discos de Freno Tr': v.km_discos_tras ?? '-',
         'Discos de Freno De': v.km_discos_del ?? '-',
         Fluidos: v.km_fluidos ?? '-',
-        'Vencimiento RTO': v.rto_due_date ?? '',
-        'Estado RTO': rto.label,
+        'Vencimiento RTO Nacional': v.rto_due_date ?? '',
+        'Vencimiento RTO Provincial': isDual ? (v.rto_provincial_due_date ?? '') : 'N/A',
+        'Estado RTO Nacional': combined.nacional.label,
+        'Estado RTO Provincial': isDual && combined.provincial ? combined.provincial.label : 'N/A',
         'Apta Pre-RTO': lastInsp ? (lastInsp.overall_ready_for_rto ? 'Sí' : 'Requiere trabajos') : 'Sin inspección',
         'Estado Unidad': STATUS_LABELS[v.status],
       };
@@ -408,7 +513,8 @@ export function exportPreventiveToExcel(vehicles: Vehicle[], inspections: Preven
       'N° Interno': i.nro_interno ?? '',
       Unidad: i.vehicle_label ?? '',
       Kilometraje: i.kilometraje ?? '',
-      'Vencimiento RTO': i.rto_due_date ?? '',
+      'Vencimiento RTO Nacional': i.rto_due_date ?? '',
+      'Vencimiento RTO Provincial': i.rto_provincial_due_date ?? '',
       Inspector: i.inspector_name ?? '',
       'Apta para RTO': i.overall_ready_for_rto ? 'Apta' : 'Requiere trabajos previos',
       'Pendientes Generados': i.generated_pending_count,

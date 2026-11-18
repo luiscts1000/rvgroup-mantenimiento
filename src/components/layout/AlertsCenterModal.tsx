@@ -15,6 +15,7 @@ import { formatDate, formatNumber } from '@/lib/utils';
 import { useVehicles } from '@/features/vehicles/api';
 import { useParts } from '@/features/inventory/api';
 import { usePendingTasks } from '@/features/pending/api';
+import { supportsProvincialRto } from '@/features/preventive/api';
 
 interface AlertsCenterModalProps {
   open: boolean;
@@ -28,21 +29,36 @@ export function AlertsCenterModal({ open, onClose }: AlertsCenterModalProps) {
   const { data: pendings = [] } = usePendingTasks();
 
   const alerts = useMemo(() => {
-    // 1. RTO Alerts
-    const rtoExpired: Array<{ id: string; patente: string; nro_interno: string | null; date: string; days: number }> = [];
-    const rtoDueSoon: Array<{ id: string; patente: string; nro_interno: string | null; date: string; days: number }> = [];
+    // 1. RTO Alerts (Nacional y Provincial si aplica)
+    const rtoExpired: Array<{ id: string; patente: string; nro_interno: string | null; date: string; days: number; type: string }> = [];
+    const rtoDueSoon: Array<{ id: string; patente: string; nro_interno: string | null; date: string; days: number; type: string }> = [];
 
     const now = new Date();
     now.setHours(0, 0, 0, 0);
 
     for (const v of vehicles) {
-      if (v.status === 'baja' || !v.rto_due_date) continue;
-      const d = new Date(v.rto_due_date + 'T00:00:00');
-      const diffDays = Math.round((d.getTime() - now.getTime()) / 86400000);
-      if (diffDays < 0) {
-        rtoExpired.push({ id: v.id, patente: v.patente, nro_interno: v.nro_interno, date: v.rto_due_date, days: diffDays });
-      } else if (diffDays <= 30) {
-        rtoDueSoon.push({ id: v.id, patente: v.patente, nro_interno: v.nro_interno, date: v.rto_due_date, days: diffDays });
+      if (v.status === 'baja') continue;
+      const isDual = supportsProvincialRto(v);
+
+      if (v.rto_due_date) {
+        const d = new Date(v.rto_due_date + 'T00:00:00');
+        const diffDays = Math.round((d.getTime() - now.getTime()) / 86400000);
+        const typeLabel = isDual ? 'RTO Nacional' : 'RTO';
+        if (diffDays < 0) {
+          rtoExpired.push({ id: v.id, patente: v.patente, nro_interno: v.nro_interno, date: v.rto_due_date, days: diffDays, type: typeLabel });
+        } else if (diffDays <= 30) {
+          rtoDueSoon.push({ id: v.id, patente: v.patente, nro_interno: v.nro_interno, date: v.rto_due_date, days: diffDays, type: typeLabel });
+        }
+      }
+
+      if (isDual && v.rto_provincial_due_date) {
+        const d = new Date(v.rto_provincial_due_date + 'T00:00:00');
+        const diffDays = Math.round((d.getTime() - now.getTime()) / 86400000);
+        if (diffDays < 0) {
+          rtoExpired.push({ id: v.id, patente: v.patente, nro_interno: v.nro_interno, date: v.rto_provincial_due_date, days: diffDays, type: 'RTO Provincial' });
+        } else if (diffDays <= 30) {
+          rtoDueSoon.push({ id: v.id, patente: v.patente, nro_interno: v.nro_interno, date: v.rto_provincial_due_date, days: diffDays, type: 'RTO Provincial' });
+        }
       }
     }
 
@@ -94,7 +110,7 @@ export function AlertsCenterModal({ open, onClose }: AlertsCenterModalProps) {
     if (alerts.rtoExpired.length > 0) {
       msg += `🚨 *RTO VENCIDAS (${alerts.rtoExpired.length}):*\n`;
       alerts.rtoExpired.forEach((r) => {
-        msg += `• ${formatPatente(r.patente)} ${r.nro_interno ? `(Int. ${r.nro_interno})` : ''} — Venció el ${formatDate(r.date)} (${Math.abs(r.days)} d)\n`;
+        msg += `• ${formatPatente(r.patente)} ${r.nro_interno ? `(Int. ${r.nro_interno})` : ''} [${r.type}] — Venció el ${formatDate(r.date)} (${Math.abs(r.days)} d)\n`;
       });
       msg += `\n`;
     }
@@ -102,7 +118,7 @@ export function AlertsCenterModal({ open, onClose }: AlertsCenterModalProps) {
     if (alerts.rtoDueSoon.length > 0) {
       msg += `⏳ *RTO PRÓXIMAS A VENCER (${alerts.rtoDueSoon.length}):*\n`;
       alerts.rtoDueSoon.forEach((r) => {
-        msg += `• ${formatPatente(r.patente)} ${r.nro_interno ? `(Int. ${r.nro_interno})` : ''} — Vence: ${formatDate(r.date)} (en ${r.days} d)\n`;
+        msg += `• ${formatPatente(r.patente)} ${r.nro_interno ? `(Int. ${r.nro_interno})` : ''} [${r.type}] — Vence: ${formatDate(r.date)} (en ${r.days} d)\n`;
       });
       msg += `\n`;
     }
@@ -196,7 +212,7 @@ export function AlertsCenterModal({ open, onClose }: AlertsCenterModalProps) {
                 <div className="mt-2 divide-y divide-red-200/60 dark:divide-red-900/40">
                   {alerts.rtoExpired.map((r) => (
                     <div
-                      key={r.id}
+                      key={`${r.id}-${r.type}`}
                       onClick={() => {
                         onClose();
                         navigate(`/unidades/${r.id}`);
@@ -206,6 +222,9 @@ export function AlertsCenterModal({ open, onClose }: AlertsCenterModalProps) {
                       <div className="flex items-center gap-2">
                         <span className="font-mono font-bold text-red-900 dark:text-red-200">{formatPatente(r.patente)}</span>
                         {r.nro_interno && <span className="text-red-700 dark:text-red-300">Int. {r.nro_interno}</span>}
+                        <span className="rounded bg-red-200/70 px-1 py-0.5 text-[10px] font-medium text-red-800 dark:bg-red-900/70 dark:text-red-200">
+                          {r.type}
+                        </span>
                       </div>
                       <span className="font-medium text-red-700 dark:text-red-300">
                         Venció el {formatDate(r.date)} ({Math.abs(r.days)} días)
@@ -226,7 +245,7 @@ export function AlertsCenterModal({ open, onClose }: AlertsCenterModalProps) {
                 <div className="mt-2 divide-y divide-amber-200/60 dark:divide-amber-900/40">
                   {alerts.rtoDueSoon.map((r) => (
                     <div
-                      key={r.id}
+                      key={`${r.id}-${r.type}`}
                       onClick={() => {
                         onClose();
                         navigate(`/unidades/${r.id}`);
@@ -236,6 +255,9 @@ export function AlertsCenterModal({ open, onClose }: AlertsCenterModalProps) {
                       <div className="flex items-center gap-2">
                         <span className="font-mono font-bold text-amber-900 dark:text-amber-200">{formatPatente(r.patente)}</span>
                         {r.nro_interno && <span className="text-amber-700 dark:text-amber-300">Int. {r.nro_interno}</span>}
+                        <span className="rounded bg-amber-200/70 px-1 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-900/70 dark:text-amber-200">
+                          {r.type}
+                        </span>
                       </div>
                       <span className="font-medium text-amber-700 dark:text-amber-300">
                         Vence: {formatDate(r.date)} (en {r.days} días)

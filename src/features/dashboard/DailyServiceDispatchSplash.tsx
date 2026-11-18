@@ -13,7 +13,7 @@ import { Button } from '@/components/ui';
 import { formatPatente } from '@/lib/patente';
 import { formatDate, formatNumber } from '@/lib/utils';
 import { useVehicles } from '@/features/vehicles/api';
-import { getRtoStatus } from '@/features/preventive/api';
+import { getRtoStatus, supportsProvincialRto } from '@/features/preventive/api';
 import type { Vehicle } from '@/types/db';
 
 interface DailyServiceDispatchSplashProps {
@@ -27,8 +27,8 @@ export function DailyServiceDispatchSplash({ onContinue }: DailyServiceDispatchS
   const report = useMemo(() => {
     const overdueKm: Array<{ v: Vehicle; kmDiff: number }> = [];
     const dueSoonKm: Array<{ v: Vehicle; kmDiff: number }> = [];
-    const expiredRto: Array<{ v: Vehicle; daysDiff: number | null }> = [];
-    const dueSoonRto: Array<{ v: Vehicle; daysDiff: number | null }> = [];
+    const expiredRto: Array<{ v: Vehicle; daysDiff: number | null; reason: string }> = [];
+    const dueSoonRto: Array<{ v: Vehicle; daysDiff: number | null; reason: string }> = [];
     let okCount = 0;
 
     for (const v of vehicles) {
@@ -48,14 +48,27 @@ export function DailyServiceDispatchSplash({ onContinue }: DailyServiceDispatchS
         }
       }
 
-      // Evaluar RTO
+      // Evaluar RTO (Nacional y Provincial)
+      const isDual = supportsProvincialRto(v);
       if (v.rto_due_date) {
         const rto = getRtoStatus(v.rto_due_date);
+        const name = isDual ? 'RTO Nacional' : 'RTO';
         if (rto.code === 'vencida') {
-          expiredRto.push({ v, daysDiff: rto.daysDiff });
+          expiredRto.push({ v, daysDiff: rto.daysDiff, reason: `${name} VENCIDA el ${formatDate(v.rto_due_date)} (${Math.abs(rto.daysDiff || 0)} días)` });
           hasIssue = true;
         } else if (rto.code === 'proxima') {
-          dueSoonRto.push({ v, daysDiff: rto.daysDiff });
+          dueSoonRto.push({ v, daysDiff: rto.daysDiff, reason: `${name} por vencer el ${formatDate(v.rto_due_date)} (en ${rto.daysDiff} días)` });
+          hasIssue = true;
+        }
+      }
+
+      if (isDual && v.rto_provincial_due_date) {
+        const rto = getRtoStatus(v.rto_provincial_due_date);
+        if (rto.code === 'vencida') {
+          expiredRto.push({ v, daysDiff: rto.daysDiff, reason: `RTO Provincial VENCIDA el ${formatDate(v.rto_provincial_due_date)} (${Math.abs(rto.daysDiff || 0)} días)` });
+          hasIssue = true;
+        } else if (rto.code === 'proxima') {
+          dueSoonRto.push({ v, daysDiff: rto.daysDiff, reason: `RTO Provincial por vencer el ${formatDate(v.rto_provincial_due_date)} (en ${rto.daysDiff} días)` });
           hasIssue = true;
         }
       }
@@ -77,7 +90,7 @@ export function DailyServiceDispatchSplash({ onContinue }: DailyServiceDispatchS
 
     for (const item of expiredRto) {
       const entry = criticalMap.get(item.v.id) || { v: item.v, reasons: [], isCritical: true };
-      entry.reasons.push(`RTO VENCIDA el ${formatDate(item.v.rto_due_date || '')} (${Math.abs(item.daysDiff || 0)} días)`);
+      entry.reasons.push(item.reason);
       entry.isCritical = true;
       criticalMap.set(item.v.id, entry);
     }
@@ -98,11 +111,11 @@ export function DailyServiceDispatchSplash({ onContinue }: DailyServiceDispatchS
       if (!criticalMap.has(item.v.id)) {
         criticalMap.set(item.v.id, {
           v: item.v,
-          reasons: [`RTO por vencer el ${formatDate(item.v.rto_due_date || '')} (en ${item.daysDiff} días)`],
+          reasons: [item.reason],
           isCritical: false,
         });
       } else {
-        criticalMap.get(item.v.id)!.reasons.push(`RTO por vencer el ${formatDate(item.v.rto_due_date || '')} (en ${item.daysDiff} días)`);
+        criticalMap.get(item.v.id)!.reasons.push(item.reason);
       }
     }
 

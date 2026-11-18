@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -12,6 +12,7 @@ import { STATUS_LABELS, VEHICLE_TYPE_SUGGESTIONS } from '@/lib/constants';
 import { useAuth } from '@/features/auth/AuthProvider';
 import type { Vehicle, VehicleStatus } from '@/types/db';
 import { useCategories, useSaveVehicle } from './api';
+import { supportsProvincialRto } from '@/features/preventive/api';
 
 const currentYear = new Date().getFullYear();
 const optInt = (min: number, max: number, msg: string) =>
@@ -39,6 +40,7 @@ const schema = z.object({
   tire_type_size: z.string().max(60),
   tire_count: optInt(0, 30, 'Entre 0 y 30'),
   rto_due_date: z.string(),
+  rto_provincial_due_date: z.string(),
   service_interval_km: optInt(1000, 200_000, 'Entre 1.000 y 200.000 km'),
   last_service_km: optInt(0, 5_000_000, 'Kilometraje inválido'),
   last_service_date: z.string(),
@@ -63,6 +65,7 @@ const toForm = (v?: Vehicle | null): FormValues => ({
   tire_type_size: v?.tire_type_size ?? '',
   tire_count: v?.tire_count?.toString() ?? '',
   rto_due_date: v?.rto_due_date ?? '',
+  rto_provincial_due_date: v?.rto_provincial_due_date ?? '',
   service_interval_km: v?.service_interval_km?.toString() ?? '10000',
   last_service_km: v?.last_service_km?.toString() ?? '',
   last_service_date: v?.last_service_date ?? '',
@@ -192,6 +195,23 @@ export function VehicleFormModal({
     }
   };
 
+  const currentMarca = watch('marca');
+  const currentModelo = watch('modelo');
+  const currentVersion = watch('version');
+  const currentVehicleType = watch('vehicle_type');
+  const currentCatId = watch('category_id');
+
+  const isDualRto = useMemo(() => {
+    const cat = categories.find((c) => c.id === currentCatId);
+    return supportsProvincialRto({
+      marca: currentMarca,
+      modelo: currentModelo,
+      version: currentVersion,
+      vehicle_type: currentVehicleType,
+      vehicle_categories: cat ? { name: cat.name } : null,
+    });
+  }, [currentMarca, currentModelo, currentVersion, currentVehicleType, currentCatId, categories]);
+
   const onSubmit = async (f: FormValues) => {
     if (dupWarning) return toast.error(dupWarning);
     const int = (s: string) => (s.trim() === '' ? null : parseInt(s.replace(/\./g, ''), 10));
@@ -212,6 +232,7 @@ export function VehicleFormModal({
       tire_type_size: txt(f.tire_type_size),
       tire_count: int(f.tire_count),
       rto_due_date: txt(f.rto_due_date),
+      rto_provincial_due_date: isDualRto ? txt(f.rto_provincial_due_date) : null,
       service_interval_km: int(f.service_interval_km) ?? 10000,
       last_service_km: int(f.last_service_km),
       last_service_date: txt(f.last_service_date),
@@ -402,11 +423,32 @@ export function VehicleFormModal({
         </section>
 
         <section>
-          <h3 className="mb-3 text-sm font-semibold text-brand-700 dark:text-brand-300">RTO y mantenimiento preventivo</h3>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
-            <Field label="Vencimiento de RTO">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-brand-700 dark:text-brand-300">
+              RTO y mantenimiento preventivo
+            </h3>
+            {isDualRto ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-teal-100 px-2.5 py-0.5 text-xs font-bold text-teal-800 dark:bg-teal-950/60 dark:text-teal-300">
+                🚐 Sprinter / Minibús: Requiere RTO Nacional y Provincial
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                🛻 Pick-up: RTO Nacional
+              </span>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <Field label={isDualRto ? 'Vencimiento RTO Nacional' : 'Vencimiento RTO (Nacional)'}>
               <input type="date" className="input" {...register('rto_due_date')} />
             </Field>
+
+            {isDualRto && (
+              <Field label="Vencimiento RTO Provincial" hint="Exigida para transporte / combis">
+                <input type="date" className="input" {...register('rto_provincial_due_date')} />
+              </Field>
+            )}
+
             <Field label="Intervalo service (km)" error={errors.service_interval_km?.message}>
               <input className="input" inputMode="numeric" {...register('service_interval_km')} placeholder="10000" />
             </Field>

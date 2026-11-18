@@ -5,7 +5,7 @@ import { Button, Field, Modal } from '@/components/ui';
 import { CHECK_ITEM_LABELS, RTO_CHECKLIST_ITEMS } from '@/lib/constants';
 import { formatPatente } from '@/lib/patente';
 import { useAuth } from '@/features/auth/AuthProvider';
-import { useCreateInspection } from './api';
+import { supportsProvincialRto, useCreateInspection } from './api';
 import type { CheckItemState, Vehicle } from '@/types/db';
 
 interface Props {
@@ -42,9 +42,13 @@ export function InspectionFormModal({ open, onClose, vehicles, defaultVehicleId 
   const [inspectorName, setInspectorName] = useState('');
   const [kilometraje, setKilometraje] = useState('');
   const [rtoDueDate, setRtoDueDate] = useState('');
+  const [rtoProvincialDueDate, setRtoProvincialDueDate] = useState('');
   const [checklist, setChecklist] = useState<ChecklistMap>(makeInitialChecklist);
   const [observations, setObservations] = useState('');
   const [generatePending, setGeneratePending] = useState(true);
+
+  const selectedVehicle = vehicles.find((x) => x.id === vehicleId);
+  const isDualRto = selectedVehicle ? supportsProvincialRto(selectedVehicle) : false;
 
   useEffect(() => {
     if (!open) return;
@@ -59,6 +63,7 @@ export function InspectionFormModal({ open, onClose, vehicles, defaultVehicleId 
     const v = vehicles.find((x) => x.id === vid);
     setKilometraje(v?.km_actual != null ? String(v.km_actual) : '');
     setRtoDueDate(v?.rto_due_date ?? '');
+    setRtoProvincialDueDate(v?.rto_provincial_due_date ?? '');
   }, [open, defaultVehicleId, profile?.full_name, vehicles]);
 
   const handleVehicleChange = (newId: string) => {
@@ -67,6 +72,9 @@ export function InspectionFormModal({ open, onClose, vehicles, defaultVehicleId 
     if (v) {
       setKilometraje(v.km_actual != null ? String(v.km_actual) : '');
       setRtoDueDate(v.rto_due_date ?? '');
+      setRtoProvincialDueDate(v.rto_provincial_due_date ?? '');
+    } else {
+      setRtoProvincialDueDate('');
     }
   };
 
@@ -89,6 +97,7 @@ export function InspectionFormModal({ open, onClose, vehicles, defaultVehicleId 
         inspector_name: inspectorName.trim() || null,
         kilometraje: kilometraje ? Number(kilometraje) : null,
         rto_due_date: rtoDueDate || null,
+        rto_provincial_due_date: isDualRto && rtoProvincialDueDate ? rtoProvincialDueDate : null,
         windshield_state: checklist.windshield.state,
         windshield_notes: checklist.windshield.notes.trim() || null,
         tires_state: checklist.tires.state,
@@ -199,7 +208,10 @@ export function InspectionFormModal({ open, onClose, vehicles, defaultVehicleId 
             />
           </Field>
 
-          <Field label="Vencimiento de RTO (actual o nuevo)">
+          <Field
+            label={isDualRto ? 'Vencimiento RTO Nacional' : 'Vencimiento RTO (Nacional)'}
+            hint={isDualRto ? '🚐 Minibús / Sprinter: Nacional' : undefined}
+          >
             <input
               type="date"
               className="input"
@@ -207,6 +219,20 @@ export function InspectionFormModal({ open, onClose, vehicles, defaultVehicleId 
               onChange={(e) => setRtoDueDate(e.target.value)}
             />
           </Field>
+
+          {isDualRto && (
+            <Field
+              label="Vencimiento RTO Provincial"
+              hint="🚐 Minibús / Sprinter: Provincial"
+            >
+              <input
+                type="date"
+                className="input border-emerald-300 focus:border-emerald-500 focus:ring-emerald-500/20 dark:border-emerald-700"
+                value={rtoProvincialDueDate}
+                onChange={(e) => setRtoProvincialDueDate(e.target.value)}
+              />
+            </Field>
+          )}
         </div>
 
         <div className="space-y-3">

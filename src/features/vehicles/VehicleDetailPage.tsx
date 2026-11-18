@@ -49,7 +49,13 @@ import { useVehicleAppointments, useVehiclePendingTasks } from '@/features/pendi
 import { PendingFormModal, PendingStatusBadge } from '@/features/pending/PendingPage';
 import { AppointmentFormModal } from '@/features/appointments/AppointmentFormModal';
 import { AppointmentStatusBadge } from '@/features/appointments/AppointmentsPage';
-import { getRtoStatus, getServiceKmStatus, useInspections } from '@/features/preventive/api';
+import {
+  getCombinedRtoStatus,
+  getRtoStatus,
+  getServiceKmStatus,
+  supportsProvincialRto,
+  useInspections,
+} from '@/features/preventive/api';
 import { InspectionFormModal } from '@/features/preventive/InspectionFormModal';
 import { InspectionDetailModal } from '@/features/preventive/PreventivePage';
 
@@ -68,6 +74,8 @@ const FIELD_LABELS: Record<string, string> = {
   category_id: 'Categoría',
   tire_type_size: 'Medida de cubiertas',
   tire_count: 'Cantidad de cubiertas',
+  rto_due_date: 'Vencimiento RTO Nacional',
+  rto_provincial_due_date: 'Vencimiento RTO Provincial',
   status: 'Estado',
   observaciones: 'Observaciones',
 };
@@ -170,6 +178,9 @@ export function VehicleDetailPage() {
     if (!v) return null;
     return analyzeVehicleComponentWear(v, workOrders, vehicleItems);
   }, [v, workOrders, vehicleItems]);
+
+  const isDualRto = v ? supportsProvincialRto(v) : false;
+  const combinedRto = useMemo(() => (v ? getCombinedRtoStatus(v) : null), [v]);
 
   if (isLoading) return <Spinner />;
   if (error || !v)
@@ -274,16 +285,30 @@ export function VehicleDetailPage() {
           tone={cpk == null ? 'slate' : cpk < 25 ? 'green' : cpk < 60 ? 'amber' : 'red'}
         />
         <StatCard
-          label="Vencimiento RTO"
-          value={v.rto_due_date ? formatDate(v.rto_due_date) : 'Sin RTO'}
-          hint={v.rto_due_date ? getRtoStatus(v.rto_due_date).label : 'Cargar vencimiento'}
+          label={isDualRto ? 'RTO Nacional y Provincial' : 'Vencimiento RTO'}
+          value={
+            isDualRto
+              ? `${v.rto_due_date ? formatDate(v.rto_due_date) : 'S/F'} | ${v.rto_provincial_due_date ? formatDate(v.rto_provincial_due_date) : 'S/F'}`
+              : v.rto_due_date
+                ? formatDate(v.rto_due_date)
+                : 'Sin RTO'
+          }
+          hint={
+            isDualRto && combinedRto
+              ? `Nac: ${combinedRto.nacional.label} · Prov: ${combinedRto.provincial?.label ?? 'S/F'}`
+              : v.rto_due_date
+                ? getRtoStatus(v.rto_due_date).label
+                : 'Cargar vencimiento'
+          }
           icon={<ShieldCheck className="h-5 w-5" />}
           tone={
-            v.rto_due_date && getRtoStatus(v.rto_due_date).code === 'vencida'
+            combinedRto?.code === 'vencida'
               ? 'red'
-              : v.rto_due_date && getRtoStatus(v.rto_due_date).code === 'proxima'
+              : combinedRto?.code === 'proxima'
                 ? 'amber'
-                : 'green'
+                : combinedRto?.code === 'vigente'
+                  ? 'green'
+                  : 'slate'
           }
         />
         <StatCard
@@ -331,17 +356,52 @@ export function VehicleDetailPage() {
               <Info label="Tipo y medida de cubiertas" value={v.tire_type_size} />
               <Info label="Cantidad de cubiertas" value={v.tire_count} />
               <Info label="Estado" value={STATUS_LABELS[v.status]} />
-              <Info
-                label="Vencimiento de RTO"
-                value={
-                  v.rto_due_date ? (
-                    <span className="inline-flex items-center gap-1.5">
-                      {formatDate(v.rto_due_date)}
-                      <Badge className={getRtoStatus(v.rto_due_date).badgeClass}>{getRtoStatus(v.rto_due_date).label}</Badge>
-                    </span>
-                  ) : null
-                }
-              />
+              {isDualRto ? (
+                <>
+                  <Info
+                    label="Vencimiento RTO Nacional"
+                    value={
+                      v.rto_due_date ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          {formatDate(v.rto_due_date)}
+                          <Badge className={combinedRto?.nacional.badgeClass}>
+                            {combinedRto?.nacional.label}
+                          </Badge>
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">Sin registrar</span>
+                      )
+                    }
+                  />
+                  <Info
+                    label="Vencimiento RTO Provincial"
+                    value={
+                      v.rto_provincial_due_date ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          {formatDate(v.rto_provincial_due_date)}
+                          <Badge className={combinedRto?.provincial?.badgeClass}>
+                            {combinedRto?.provincial?.label}
+                          </Badge>
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">Sin registrar</span>
+                      )
+                    }
+                  />
+                </>
+              ) : (
+                <Info
+                  label="Vencimiento RTO (Nacional)"
+                  value={
+                    v.rto_due_date ? (
+                      <span className="inline-flex items-center gap-1.5">
+                        {formatDate(v.rto_due_date)}
+                        <Badge className={getRtoStatus(v.rto_due_date).badgeClass}>{getRtoStatus(v.rto_due_date).label}</Badge>
+                      </span>
+                    ) : null
+                  }
+                />
+              )}
               <Info
                 label="Último service preventivo"
                 value={

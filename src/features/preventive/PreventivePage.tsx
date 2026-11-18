@@ -40,12 +40,13 @@ import {
   exportPreventiveToExcel,
   formatShortModelLabel,
   getBrandGroup,
+  getCombinedRtoStatus,
   getComponentCellClass,
   getPresetByBrand,
   getRestanteCellClass,
-  getRtoStatus,
   getServiceKmStatus,
   PREVENTIVE_KM_COLUMNS,
+  supportsProvincialRto,
   useInspections,
   useUpdateVehiclePreventive,
   type BrandGroup,
@@ -111,7 +112,7 @@ export function PreventivePage() {
       if (svc.code === 'proximo') serviceYellow++;
       if (hasExpiredComponent(v)) compExpired++;
 
-      const rto = getRtoStatus(v.rto_due_date);
+      const rto = getCombinedRtoStatus(v);
       const lastInsp = latestInspectionByVehicle.get(v.id);
       if (rto.code === 'vencida' || rto.code === 'proxima' || (lastInsp && !lastInsp.overall_ready_for_rto)) {
         rtoAlert++;
@@ -141,7 +142,7 @@ export function PreventivePage() {
           if (!hay.includes(q)) return false;
         }
         const svc = getServiceKmStatus(v);
-        const rto = getRtoStatus(v.rto_due_date);
+        const rto = getCombinedRtoStatus(v);
         const lastInsp = latestInspectionByVehicle.get(v.id);
 
         if (filterMode === 'service_red') return svc.code === 'vencido';
@@ -549,7 +550,8 @@ export function PreventivePage() {
                       const brand = getBrandGroup(v);
                       const modelLabel = formatShortModelLabel(v);
                       const svc = getServiceKmStatus(v);
-                      const rto = getRtoStatus(v.rto_due_date);
+                      const isDual = supportsProvincialRto(v);
+                      const rtoComb = getCombinedRtoStatus(v);
                       const lastInsp = latestInspectionByVehicle.get(v.id);
 
                       return (
@@ -610,22 +612,47 @@ export function PreventivePage() {
                           })}
 
                           <td
-                            className="border-l border-slate-200 px-2 py-1.5 text-center whitespace-nowrap dark:border-slate-800"
+                            className="border-l border-slate-200 px-2 py-1 text-center whitespace-nowrap dark:border-slate-800"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            <div className="flex items-center justify-center gap-1">
-                              <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${rto.badgeClass}`}>
-                                {v.rto_due_date ? formatDate(v.rto_due_date) : 'S/F'}
-                              </span>
-                              {lastInsp && !lastInsp.overall_ready_for_rto && (
-                                <span
-                                  title="Última inspección pre-RTO requiere trabajos"
-                                  className="rounded bg-red-600 px-1 py-0.5 text-[10px] font-bold text-white"
-                                >
-                                  !
+                            {isDual ? (
+                              <div className="flex flex-col items-center justify-center gap-0.5">
+                                <div className="flex items-center gap-1" title="RTO Nacional">
+                                  <span className="text-[9px] font-bold text-slate-400">N</span>
+                                  <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${rtoComb.nacional.badgeClass}`}>
+                                    {v.rto_due_date ? formatDate(v.rto_due_date) : 'S/F'}
+                                  </span>
+                                  {lastInsp && !lastInsp.overall_ready_for_rto && (
+                                    <span
+                                      title="Última inspección pre-RTO requiere trabajos"
+                                      className="rounded bg-red-600 px-1 py-0.2 text-[9px] font-bold text-white"
+                                    >
+                                      !
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1" title="RTO Provincial">
+                                  <span className="text-[9px] font-bold text-slate-400">P</span>
+                                  <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${rtoComb.provincial?.badgeClass ?? ''}`}>
+                                    {v.rto_provincial_due_date ? formatDate(v.rto_provincial_due_date) : 'S/F'}
+                                  </span>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-center gap-1" title="RTO Nacional">
+                                <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${rtoComb.nacional.badgeClass}`}>
+                                  {v.rto_due_date ? formatDate(v.rto_due_date) : 'S/F'}
                                 </span>
-                              )}
-                            </div>
+                                {lastInsp && !lastInsp.overall_ready_for_rto && (
+                                  <span
+                                    title="Última inspección pre-RTO requiere trabajos"
+                                    className="rounded bg-red-600 px-1 py-0.5 text-[10px] font-bold text-white"
+                                  >
+                                    !
+                                  </span>
+                                )}
+                              </div>
+                            )}
                           </td>
 
                           <td
@@ -843,9 +870,11 @@ function VehiclePreventiveModal({
   onClose: () => void;
 }) {
   const updateMut = useUpdateVehiclePreventive();
+  const isDualRto = vehicle ? supportsProvincialRto(vehicle) : false;
   const [kmActual, setKmActual] = useState('');
   const [nextServiceKm, setNextServiceKm] = useState('');
   const [rtoDueDate, setRtoDueDate] = useState('');
+  const [rtoProvincialDueDate, setRtoProvincialDueDate] = useState('');
   const [compValues, setCompValues] = useState<Record<PreventiveKmField, string>>({
     km_cubiertas: '',
     km_correas: '',
@@ -865,6 +894,7 @@ function VehiclePreventiveModal({
     setKmActual(vehicle.km_actual != null ? String(vehicle.km_actual) : '');
     setNextServiceKm(svc.nextKm != null ? String(svc.nextKm) : '');
     setRtoDueDate(vehicle.rto_due_date ?? '');
+    setRtoProvincialDueDate(vehicle.rto_provincial_due_date ?? '');
     setCompValues({
       km_cubiertas: vehicle.km_cubiertas != null ? String(vehicle.km_cubiertas) : '',
       km_correas: vehicle.km_correas != null ? String(vehicle.km_correas) : '',
@@ -918,6 +948,7 @@ function VehiclePreventiveModal({
         km_actual: toNullableInt(kmActual),
         next_service_km: toNullableInt(nextServiceKm),
         rto_due_date: rtoDueDate || null,
+        rto_provincial_due_date: isDualRto && rtoProvincialDueDate ? rtoProvincialDueDate : null,
         km_cubiertas: toNullableInt(compValues.km_cubiertas),
         km_correas: toNullableInt(compValues.km_correas),
         km_amortiguadores_del: toNullableInt(compValues.km_amortiguadores_del),
@@ -1008,14 +1039,35 @@ function VehiclePreventiveModal({
             </div>
           </Field>
 
-          <Field label="Vencimiento de RTO">
-            <input
-              type="date"
-              className="input"
-              value={rtoDueDate}
-              onChange={(e) => setRtoDueDate(e.target.value)}
-            />
-          </Field>
+          {isDualRto ? (
+            <>
+              <Field label="Vencimiento RTO Nacional" hint="🚐 Minibús / Sprinter: Nacional">
+                <input
+                  type="date"
+                  className="input"
+                  value={rtoDueDate}
+                  onChange={(e) => setRtoDueDate(e.target.value)}
+                />
+              </Field>
+              <Field label="Vencimiento RTO Provincial" hint="🚐 Minibús / Sprinter: Provincial">
+                <input
+                  type="date"
+                  className="input border-emerald-300 focus:border-emerald-500 focus:ring-emerald-500/20 dark:border-emerald-700"
+                  value={rtoProvincialDueDate}
+                  onChange={(e) => setRtoProvincialDueDate(e.target.value)}
+                />
+              </Field>
+            </>
+          ) : (
+            <Field label="Vencimiento de RTO (Nacional)">
+              <input
+                type="date"
+                className="input"
+                value={rtoDueDate}
+                onChange={(e) => setRtoDueDate(e.target.value)}
+              />
+            </Field>
+          )}
         </div>
 
         {/* Los 10 componentes de seguimiento por kilometraje */}
@@ -1132,11 +1184,17 @@ export function InspectionDetailModal({
             </p>
           </div>
           <div className="rounded-lg border border-slate-200 p-2.5 dark:border-slate-800">
-            <span className="text-slate-500">Vencimiento RTO:</span>
+            <span className="text-slate-500">{inspection.rto_provincial_due_date ? 'RTO Nacional:' : 'Vencimiento RTO:'}</span>
             <p className="font-semibold">
               {inspection.rto_due_date ? formatDate(inspection.rto_due_date) : '—'}
             </p>
           </div>
+          {inspection.rto_provincial_due_date && (
+            <div className="rounded-lg border border-slate-200 p-2.5 dark:border-slate-800">
+              <span className="text-slate-500">RTO Provincial:</span>
+              <p className="font-semibold">{formatDate(inspection.rto_provincial_due_date)}</p>
+            </div>
+          )}
           <div className="rounded-lg border border-slate-200 p-2.5 dark:border-slate-800">
             <span className="text-slate-500">Pendientes generados:</span>
             <p className="font-semibold">{inspection.generated_pending_count}</p>
