@@ -34,6 +34,7 @@ import {
 import { CHECK_ITEM_COLORS, CHECK_ITEM_LABELS, RTO_CHECKLIST_ITEMS } from '@/lib/constants';
 import { formatPatente } from '@/lib/patente';
 import { formatDate, formatNumber } from '@/lib/utils';
+import { friendlyError } from '@/lib/supabase';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { useVehicles } from '@/features/vehicles/api';
 import {
@@ -963,7 +964,7 @@ function VehiclePreventiveModal({
       toast.success(`Planilla preventiva actualizada para ${formatPatente(vehicle.patente)}`);
       onClose();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Error al guardar');
+      toast.error(friendlyError(err));
     }
   };
 

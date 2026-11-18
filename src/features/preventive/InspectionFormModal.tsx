@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCircle2, ClipboardCheck } from 'lucide-react';
 import { Button, Field, Modal } from '@/components/ui';
 import { CHECK_ITEM_LABELS, RTO_CHECKLIST_ITEMS } from '@/lib/constants';
 import { formatPatente } from '@/lib/patente';
+import { friendlyError } from '@/lib/supabase';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { supportsProvincialRto, useCreateInspection } from './api';
 import type { CheckItemState, Vehicle } from '@/types/db';
@@ -127,7 +128,7 @@ export function InspectionFormModal({ open, onClose, vehicles, defaultVehicleId 
       }
       onClose();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Error al registrar la inspección');
+      toast.error(friendlyError(err));
     }
   };
 
